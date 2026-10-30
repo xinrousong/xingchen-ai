@@ -34,10 +34,14 @@ def query_temps() -> dict:
             return _temp_cache["data"]
         data = {"gpu_temp": None, "power_w": None, "gpu_util": None, "cpu": None}
         try:
+            # CREATE_NO_WINDOW：本进程没有控制台时，子进程会自己弹一个黑窗口，
+            # 面板每 2 秒查一次温度，不屏蔽就会一直闪窗。
+            _no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             out = subprocess.run(
                 ["nvidia-smi", "--query-gpu=temperature.gpu,power.draw,utilization.gpu",
                  "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=5).stdout.strip()
+                capture_output=True, text=True, timeout=5,
+                creationflags=_no_window).stdout.strip()
             g, p, u = [x.strip() for x in out.split(",")]
             data.update(gpu_temp=float(g), power_w=float(p), gpu_util=float(u))
         except Exception:

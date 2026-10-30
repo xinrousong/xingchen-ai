@@ -39,9 +39,11 @@ def log(msg: str) -> None:
 
 
 def nvidia_query(fields: str) -> str:
+    # CREATE_NO_WINDOW：看门狗没有控制台时，子进程会弹黑窗；5 秒一次会一直闪
+    _no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     out = subprocess.run(
         ["nvidia-smi", f"--query-gpu={fields}", "--format=csv,noheader,nounits"],
-        capture_output=True, text=True, timeout=8)
+        capture_output=True, text=True, timeout=8, creationflags=_no_window)
     return out.stdout.strip()
 
 
