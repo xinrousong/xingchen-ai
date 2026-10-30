@@ -1,0 +1,57 @@
+# 星辰 · base 重修配置（M1）：1.67 亿参数，把书从 6500 万 token 补到约 3 亿
+# 硬件实测边界：seq512 × batch2 = 4.7GB 显存（seq1024 会静默溢出，禁止）
+# 总步数 36000 ≈ 2.95 亿 token；从 8000 续训，约 20 小时，分 2~3 晚跑，
+# 断了就重跑同一条 --resume 命令，会自动接续；跑满后再跑会秒退（幂等）。
+
+name: xingchen-base-wiki
+
+model:
+  vocab_size: 16384
+  dim: 768
+  n_layers: 10
+  n_heads: 12
+  ffn: moe
+  first_k_dense: 1
+  dense_intermediate: 1920
+  tie_embeddings: true
+  mla:
+    q_lora_rank: 512
+    kv_lora_rank: 256
+    qk_nope_head_dim: 64
+    qk_rope_head_dim: 32
+    v_head_dim: 64
+  moe:
+    n_routed: 12
+    n_shared: 2
+    top_k: 4
+    expert_dim: 384
+    balance_gamma: 0.001
+  mtp:
+    enabled: true
+    loss_weight: 0.3
+  hc:
+    enabled: true
+    n_streams: 2            # 显存考虑从 4 降到 2（V4 论文为 4）
+    sinkhorn_iters: 20
+    alpha_init: 0.01
+
+train:
+  seq_len: 512
+  batch_size: 2
+  grad_accum: 8             # 等效 batch = 2 × 512 × 8 = 8192 token/步
+  max_iters: 36000          # 目标总步数；--resume 会从上次存档继续
+  lr: 3.0e-4
+  min_lr: 3.0e-5
+  warmup_iters: 500
+  weight_decay: 0.1
+  eval_interval: 1000
+  eval_iters: 20
+  ckpt_interval: 2000       # 每 2000 步存档（约 55 分钟），断电最多丢 1 小时
+  sample_interval: 3000
+  amp: bf16
+  out_dir: checkpoints-base-wiki
+
+data:
+  tokenizer_path: data/wiki/tokenizer.json
+  train_bin: data/wiki/train.bin      # 已含核心记忆注入的 3.08 亿 token 语料
+  val_bin: data/wiki/val.bin

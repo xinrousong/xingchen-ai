@@ -1,0 +1,53 @@
+# 星辰 · tiny + 中文维基语料（约 52M 参数，300MB 语料 ≈ 1 亿 token，跑 24000 步 ≈ 98M token）
+
+name: xingchen-tiny-wiki
+
+model:
+  vocab_size: 16384
+  dim: 384
+  n_layers: 6
+  n_heads: 6
+  ffn: moe
+  first_k_dense: 1
+  tie_embeddings: true
+  mla:
+    q_lora_rank: 128
+    kv_lora_rank: 64
+    qk_nope_head_dim: 32
+    qk_rope_head_dim: 16
+    v_head_dim: 32
+  moe:
+    n_routed: 8
+    n_shared: 1
+    top_k: 2
+    expert_dim: 768
+    balance_gamma: 0.001
+  mtp:
+    enabled: true
+    loss_weight: 0.3
+  hc:
+    enabled: true
+    n_streams: 2
+    sinkhorn_iters: 20
+    alpha_init: 0.01
+
+train:
+  seq_len: 512
+  batch_size: 8
+  grad_accum: 1
+  max_iters: 24000       # ≈ 9800 万 token，约 100 分钟
+  lr: 6.0e-4
+  min_lr: 6.0e-5
+  warmup_iters: 500
+  weight_decay: 0.1
+  eval_interval: 1000
+  eval_iters: 20
+  ckpt_interval: 8000
+  sample_interval: 2000
+  amp: bf16
+  out_dir: checkpoints-wiki
+
+data:
+  tokenizer_path: data/wiki/tokenizer.json
+  train_bin: data/wiki/train.bin
+  val_bin: data/wiki/val.bin

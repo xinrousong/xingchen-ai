@@ -1,0 +1,7 @@
+{"type": "meta", "name": "xingchen-tiny", "params_m": 52.32, "vocab": 4096, "seq": 512, "batch": 8, "max_iters": 40, "device": "cuda"}
+{"type": "train", "iter": 1, "loss": 8.5716, "mtp": 8.6115, "lr": 5.999999999999999e-06, "tok_s": 2987, "load_dev": 0.1576, "vram_gb": 2.45}
+{"type": "train", "iter": 10, "loss": 8.3987, "mtp": 8.3707, "lr": 5.9999999999999995e-05, "tok_s": 19898, "load_dev": 0.1606, "vram_gb": 2.89}
+{"type": "train", "iter": 20, "loss": 7.5873, "mtp": 7.3973, "lr": 0.00011999999999999999, "tok_s": 19799, "load_dev": 0.2061, "vram_gb": 2.89}
+{"type": "train", "iter": 30, "loss": 6.5717, "mtp": 5.8703, "lr": 0.00017999999999999998, "tok_s": 19691, "load_dev": 0.2002, "vram_gb": 2.89}
+{"type": "train", "iter": 40, "loss": 5.278, "mtp": 4.0763, "lr": 0.00023999999999999998, "tok_s": 19819, "load_dev": 0.1935, "vram_gb": 2.89}
+{"type": "done", "iters": 40}

@@ -1,0 +1,4 @@
+GPU: NVIDIA GeForce RTX 5060 Laptop GPU  已占用 0.00 GB
+MoE: dim=768 E=12 top_k=4 N=1024
+  loop       :    8.10 ms/次
+  vectorized :    3.79 ms/次

@@ -1,0 +1,36 @@
+# ---- 模型权重（GB 级，不进 git；用 MANIFEST.md 记哈希与位置）----
+*.pt
+
+# ---- 大语料 / token 流（可重建，留在本地或 E 盘）----
+*.bin
+data/wiki/
+data/sft/
+data/sft_raw/
+
+# ---- 编译产物 ----
+*.dll
+*.exp
+*.lib
+*.obj
+build/
+
+# ---- Python ----
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# ---- 日志：保留 train_log.jsonl / core_check_history.log 这类研究素材，
+#      排除控制台原样输出（GBK 编码、体积大）与看门狗心跳
+logs/*.log
+logs/*.err.log
+/*.log
+
+# ---- 编辑器 / 系统 ----
+.idea/
+.vscode/
+Thumbs.db
+desktop.ini
+
+temp_watch.log
