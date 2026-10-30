@@ -1,0 +1,53 @@
+# 星辰 · tiny 演示配置（约 12M 参数，8GB 显卡可与 ComfyUI 共存训练）
+# 架构 = MLA + 细粒度MoE + MTP + mHC，全部开启，用于走通 DeepSeek 全家桶
+
+name: xingchen-tiny
+
+model:
+  vocab_size: 4096
+  dim: 384
+  n_layers: 6
+  n_heads: 6
+  ffn: moe
+  first_k_dense: 1          # V3：前几层用稠密 FFN
+  tie_embeddings: true
+  mla:
+    q_lora_rank: 128        # V3 为 1536（dim 7168），按比例缩小
+    kv_lora_rank: 64        # V3 为 512
+    qk_nope_head_dim: 32    # V3 为 128
+    qk_rope_head_dim: 16    # V3 为 64
+    v_head_dim: 32          # V3 为 128
+  moe:
+    n_routed: 8             # V3 为 256 路由专家
+    n_shared: 1             # 共享专家始终激活（DeepSeekMoE）
+    top_k: 2
+    expert_dim: 768
+    balance_gamma: 0.001    # V3 无辅助损失均衡的更新步长
+  mtp:
+    enabled: true
+    loss_weight: 0.3
+  hc:
+    enabled: true
+    n_streams: 2            # V4 论文用 4，演示取 2 省显存
+    sinkhorn_iters: 20
+    alpha_init: 0.01
+
+train:
+  seq_len: 512
+  batch_size: 8
+  grad_accum: 1
+  max_iters: 2000
+  lr: 6.0e-4
+  min_lr: 6.0e-5
+  warmup_iters: 100
+  weight_decay: 0.1
+  eval_interval: 200
+  eval_iters: 20
+  ckpt_interval: 500
+  sample_interval: 200
+  amp: bf16
+
+data:
+  tokenizer_path: data/tokenizer.json
+  train_bin: data/train.bin
+  val_bin: data/val.bin

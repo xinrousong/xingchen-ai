@@ -1,0 +1,2 @@
+{"type": "meta", "name": "xingchen-tiny-wiki", "params_m": 57.04, "vocab": 16384, "seq": 512, "batch": 8, "max_iters": 72000, "device": "cuda"}
+{"type": "done", "iters": 72000}

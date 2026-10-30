@@ -1,0 +1,14 @@
+配置：dim=384 layers=6 experts=8 top_k=2 expert_dim=768
+
+[MoE] 前向最大差 = 0.000e+00   ✅
+[MoE] 梯度最大差 = 0.000e+00   ✅
+[MoE] 专家计数 loop=[250, 298, 234, 260, 241, 266, 263, 236] vectorized=[250, 298, 234, 260, 241, 266, 263, 236]
+
+[MLA] 前向最大差 = 2.086e-07（量级 1.045）   ✅
+[MLA] 梯度最大差 = 1.907e-05   ✅
+
+[整模型] logits 最大差 = 1.431e-06   ✅
+
+[基准] MoE 1024 token（CPU）loop       :    15.4 ms
+
+[基准] MoE 1024 token（CPU）vectorized :    15.8 ms

@@ -1,0 +1,55 @@
+# 星辰 · base 配置（约 1.3 亿参数，需 8GB 显存独占：先关闭 ComfyUI 再训练）
+# 尺寸与 DeepSeek 系列的比例关系写在注释里，可按显存继续加减
+
+name: xingchen-base
+
+model:
+  vocab_size: 16384         # 与 data/wiki 的分词器一致
+  dim: 768
+  n_layers: 10
+  n_heads: 12
+  ffn: moe
+  first_k_dense: 1          # V3 为 3
+  dense_intermediate: 1920
+  tie_embeddings: true
+  mla:
+    q_lora_rank: 512
+    kv_lora_rank: 256
+    qk_nope_head_dim: 64
+    qk_rope_head_dim: 32
+    v_head_dim: 64
+  moe:
+    n_routed: 12
+    n_shared: 2
+    top_k: 4
+    expert_dim: 384         # 细粒度专家：单专家比稠密 FFN 窄，靠数量取胜
+    balance_gamma: 0.001
+  mtp:
+    enabled: true
+    loss_weight: 0.3
+  hc:
+    enabled: true
+    n_streams: 2            # 显存考虑从 4 降到 2（V4 论文为 4）
+    sinkhorn_iters: 20
+    alpha_init: 0.01
+
+train:
+  seq_len: 512              # 8GB 卡实测：seq1024×batch4 要 12.7GB 会溢出到内存，降到这里只要 ~4GB
+  batch_size: 2
+  grad_accum: 8             # 等效 batch = 2 × 512 × 8 = 8192 token/步
+  max_iters: 8000           # ≈ 6500 万 token，实测 ~3k tok/s ≈ 6 小时，早上能跑完；可 --resume 续训
+  lr: 3.0e-4
+  min_lr: 3.0e-5
+  warmup_iters: 500
+  weight_decay: 0.1
+  eval_interval: 1000
+  eval_iters: 20
+  ckpt_interval: 3000
+  sample_interval: 3000
+  amp: bf16
+  out_dir: checkpoints-base
+
+data:
+  tokenizer_path: data/wiki/tokenizer.json
+  train_bin: data/wiki/train.bin
+  val_bin: data/wiki/val.bin
