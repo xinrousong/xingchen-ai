@@ -1,0 +1,16 @@
+{"type": "meta", "name": "xingchen-base-wiki", "params_m": 166.37, "vocab": 16384, "seq": 512, "batch": 2, "max_iters": 10200, "device": "cuda"}
+{"type": "train", "iter": 9001, "loss": 3.1843, "mtp": 8.7222, "lr": 4.0068133998234936e-05, "tok_s": 2661, "load_dev": 0.3218, "vram_gb": 4.18}
+{"type": "train", "iter": 9010, "loss": 2.6369, "mtp": 5.3149, "lr": 3.991954872629786e-05, "tok_s": 4257, "load_dev": 0.3185, "vram_gb": 4.3}
+{"type": "train", "iter": 9020, "loss": 1.6256, "mtp": 3.5804, "lr": 3.9755700467451865e-05, "tok_s": 4302, "load_dev": 0.3232, "vram_gb": 4.3}
+{"type": "train", "iter": 9030, "loss": 1.5997, "mtp": 3.252, "lr": 3.959316596204336e-05, "tok_s": 4080, "load_dev": 0.3151, "vram_gb": 4.31}
+{"type": "train", "iter": 9040, "loss": 0.6762, "mtp": 1.5261, "lr": 3.943194691498244e-05, "tok_s": 4026, "load_dev": 0.319, "vram_gb": 4.31}
+{"type": "train", "iter": 9050, "loss": 1.258, "mtp": 2.2006, "lr": 3.927204501738059e-05, "tok_s": 4024, "load_dev": 0.3126, "vram_gb": 4.31}
+{"type": "train", "iter": 9060, "loss": 1.1238, "mtp": 1.9539, "lr": 3.9113461946533065e-05, "tok_s": 3981, "load_dev": 0.3171, "vram_gb": 4.31}
+{"type": "train", "iter": 9070, "loss": 0.4201, "mtp": 0.6831, "lr": 3.8956199365901254e-05, "tok_s": 3991, "load_dev": 0.3187, "vram_gb": 4.31}
+{"type": "train", "iter": 9080, "loss": 0.266, "mtp": 0.4805, "lr": 3.880025892509515e-05, "tok_s": 4029, "load_dev": 0.3205, "vram_gb": 4.31}
+{"type": "train", "iter": 9090, "loss": 0.62, "mtp": 1.0292, "lr": 3.864564225985628e-05, "tok_s": 4085, "load_dev": 0.3155, "vram_gb": 4.31}
+{"type": "train", "iter": 9100, "loss": 0.5231, "mtp": 0.8855, "lr": 3.849235099204023e-05, "tok_s": 4131, "load_dev": 0.3205, "vram_gb": 4.31}
+{"type": "train", "iter": 9110, "loss": 0.8601, "mtp": 1.4816, "lr": 3.834038672959991e-05, "tok_s": 4179, "load_dev": 0.3181, "vram_gb": 4.31}
+{"type": "train", "iter": 9120, "loss": 0.5848, "mtp": 0.9768, "lr": 3.8189751066568486e-05, "tok_s": 3988, "load_dev": 0.3202, "vram_gb": 4.31}
+{"type": "train", "iter": 9130, "loss": 0.591, "mtp": 0.9607, "lr": 3.8040445583042816e-05, "tok_s": 3945, "load_dev": 0.3199, "vram_gb": 4.31}
+{"type": "train", "iter": 9140, "loss": 0.6412, "mtp": 1.0703, "lr": 3.789247184516673e-05, "tok_s": 4368, "load_dev": 0.3201, "vram_gb": 4.31}
