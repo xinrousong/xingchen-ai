@@ -35,6 +35,10 @@ from xingchen.tokenizer import ByteBPETokenizer  # noqa: E402
 
 HISTORY = ROOT / "logs" / "eval_history.log"
 
+# 控制台是 GBK，直接打印 ✅/❌ 会 UnicodeEncodeError，统一按 UTF-8 输出
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def load_questions() -> list[dict]:
     rows: list[dict] = []
@@ -104,12 +108,13 @@ def main() -> None:
             f"({ok/max(1,scored)*100:.0f}%)  用时 {time.time()-t0:.0f}s")
     cat_line = "  ".join(f"{k} {v[0]}/{v[1]}" for k, v in sorted(per_cat.items()))
     body = "\n".join(lines)
-    print(head)
-    print("分项：" + cat_line)
-    print(body)
+    # 先落盘再打印：控制台编码问题不该让结果丢掉
     HISTORY.parent.mkdir(exist_ok=True)
     with open(HISTORY, "a", encoding="utf-8") as fh:
         fh.write(head + "\n分项：" + cat_line + "\n" + body + "\n")
+    print(head)
+    print("分项：" + cat_line)
+    print(body)
 
 
 if __name__ == "__main__":
