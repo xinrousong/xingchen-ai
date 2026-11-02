@@ -60,6 +60,9 @@ def main() -> None:
     ap.add_argument("--val_bin", default=None, help="覆盖配置里的验证集路径")
     ap.add_argument("--lr", type=float, default=None, help="覆盖配置里的学习率")
     ap.add_argument("--out_dir", default=None, help="覆盖检查点输出目录")
+    ap.add_argument("--replay_bin", default=None,
+                    help="replay 语料（一般指回配置里的预训练 train.bin）：按概率掺入，防止记忆特训把语言能力练坏")
+    ap.add_argument("--replay_prob", type=float, default=0.0)
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -94,12 +97,24 @@ def main() -> None:
     val_data = load_bin(ROOT / cfg.data.val_bin)
     print(f"[train] 训练 token {len(train_data):,} / 验证 token {len(val_data):,}")
 
+    replay_data = None
+    if args.replay_bin:
+        rp = Path(args.replay_bin)
+        if rp.exists():
+            replay_data = load_bin(rp)
+            print(f"[train] replay：{len(replay_data):,} token，每 batch {args.replay_prob:.0%} 概率掺入")
+        else:
+            print(f"[train] 警告：找不到 replay 语料 {rp}，本次不掺")
+
     # ---------------- 模型与优化器
     model = XingChen(cfg.model).to(device)
+    model.grad_checkpoint = bool(getattr(cfg.train, "grad_checkpoint", False))
     stats = param_summary(model)
     print(f"[train] 模型 {cfg.name}：{stats['total']/1e6:.2f}M 参数 "
           f"(embedding {stats['embedding']/1e6:.2f}M, attention {stats['attention']/1e6:.2f}M, "
           f"moe/ffn {stats['moe/ffn']/1e6:.2f}M, 其他 {stats['mhc/mtp/其他']/1e6:.2f}M)")
+    if model.grad_checkpoint:
+        print(f"[train] 梯度检查点：开（seq_len={cfg.train.seq_len}，用算力换显存）")
 
     decay, no_decay = [], []
     for name, p in model.named_parameters():
@@ -174,7 +189,10 @@ def main() -> None:
         loss_main_acc = 0.0
         loss_mtp_acc = 0.0
         for _ in range(cfg.train.grad_accum):
-            x, y = get_batch(train_data, B, T, device)
+            src = train_data
+            if replay_data is not None and random.random() < args.replay_prob:
+                src = replay_data          # 掺一条预训练批次，保住通用语言能力
+            x, y = get_batch(src, B, T, device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
                 logits, h = model(x)
                 # y 已是右移一位的标签：logits[t] 直接对 y[t]

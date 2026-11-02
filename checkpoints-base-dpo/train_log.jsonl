@@ -1,0 +1,7 @@
+{"type": "meta", "init": "latest.pt", "pairs": 57, "beta": 0.1, "lr": 5e-06, "epochs": 2}
+{"type": "train", "step": 20, "loss": 0.7463, "margin": -1.0358}
+{"type": "train", "step": 40, "loss": 0.6425, "margin": 1.0397}
+{"type": "train", "step": 60, "loss": 0.0035, "margin": 56.561}
+{"type": "train", "step": 80, "loss": 0.0091, "margin": 46.9765}
+{"type": "train", "step": 100, "loss": 0.0272, "margin": 35.926}
+{"type": "done", "steps": 114}

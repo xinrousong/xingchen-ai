@@ -79,6 +79,8 @@ def main() -> None:
     ap.add_argument("--samples", type=int, default=4, help="每个提示采样几条")
     ap.add_argument("--max_new", type=int, default=72)
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--resume", action="store_true",
+                    help="在已有 pairs.jsonl 上续跑：跳过已用过的提示，追加新对")
     args = ap.parse_args()
 
     cfg = load_config(ROOT / "configs" / "base-wiki.yaml")
@@ -90,13 +92,43 @@ def main() -> None:
     prompts = load_prompts(args.prompts, args.seed)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    progress_path = out_path.parent / "progress.txt"
+
+    used: set[str] = set()
+    if args.resume and out_path.exists():
+        for line in out_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line:
+                try:
+                    used.add(json.loads(line)["prompt"])
+                except (json.JSONDecodeError, KeyError):
+                    pass
+        progress_path.write_text("", encoding="utf-8")
+    else:
+        used = set()
+        progress_path.write_text("", encoding="utf-8")
+        out_path.write_text("", encoding="utf-8")
+
     t0 = time.time()
     made = 0
     seen = 0
+    skipped = 0
 
-    with open(out_path, "w", encoding="utf-8") as fh:
+    def report(msg: str) -> None:
+        """同时写进度文件（供另一个窗口 tail -Wait 实时看）。"""
+        with open(progress_path, "a", encoding="utf-8") as pf:
+            pf.write(f"{time.strftime('%H:%M:%S')}  {msg}\n")
+        print(f"[pairs] {msg}", flush=True)
+
+    if used:
+        report(f"续跑：已有 {len(used)} 条提示做过，跳过它们继续")
+
+    with open(out_path, "a" if used else "w", encoding="utf-8") as fh:
         for i, q in enumerate(prompts, 1):
             prefix = f"问：{q}\n答："
+            if prefix in used:          # 续跑：这条提示已经有对了
+                skipped += 1
+                continue
             ids = tok.encode(prefix, add_bos=True)
             cands = []
             for k in range(args.samples):
@@ -106,22 +138,25 @@ def main() -> None:
                 ans = tok.decode(out[len(ids):]).strip()
                 if ans:
                     cands.append((score(ans, q), ans))
-            if len(cands) < 2:
-                continue
-            seen += 1
-            cands.sort(key=lambda x: x[0])
-            worst, best = cands[0], cands[-1]
-            if best[0] - worst[0] < 1.0:      # 差距太小，不适合当偏好对
-                continue
-            fh.write(json.dumps({"prompt": prefix, "chosen": best[1], "rejected": worst[1],
-                                 "chosen_score": round(best[0], 2),
-                                 "rejected_score": round(worst[0], 2)},
-                                ensure_ascii=False) + "\n")
-            made += 1
-            if i % 20 == 0:
-                print(f"[pairs] {i}/{len(prompts)} 提示，已生成 {made} 对，{time.time()-t0:.0f}s", flush=True)
+            if len(cands) >= 2:
+                seen += 1
+                cands.sort(key=lambda x: x[0])
+                worst, best = cands[0], cands[-1]
+                if best[0] - worst[0] >= 1.0:      # 差距太小，不适合当偏好对
+                    fh.write(json.dumps({"prompt": prefix, "chosen": best[1], "rejected": worst[1],
+                                         "chosen_score": round(best[0], 2),
+                                         "rejected_score": round(worst[0], 2)},
+                                        ensure_ascii=False) + "\n")
+                    fh.flush()                      # 立刻落盘，进度可见、崩了也不丢
+                    made += 1
+            elapsed = time.time() - t0
+            done_now = i - skipped
+            eta = elapsed / max(1, done_now) * (len(prompts) - i) / 60
+            if done_now % 5 == 0 or i == len(prompts):
+                report(f"{i}/{len(prompts)} 提示 | 本次新增 {made} 对 | 跳过 {skipped} | "
+                       f"已用 {elapsed/60:.0f} 分钟 | 剩余约 {eta:.0f} 分钟")
 
-    print(f"[pairs] 完成：{made} 对（{seen} 个提示有效）→ {out_path}", flush=True)
+    report(f"完成：本次新增 {made} 对，跳过 {skipped} 条已做过的（{seen} 个提示有效）")
 
 
 if __name__ == "__main__":

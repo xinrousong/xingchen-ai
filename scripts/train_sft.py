@@ -46,6 +46,16 @@ def get_batch(tokens: np.memmap, mask: np.memmap, batch_size: int, seq_len: int,
     return x.to(device), y.to(device), m.to(device)
 
 
+def get_lm_batch(tokens: np.memmap, batch_size: int, seq_len: int, device: torch.device):
+    """replay 用：纯语言建模 batch，全部位置都算损失。"""
+    seq = min(seq_len, len(tokens) - 1)
+    high = len(tokens) - seq - 1
+    ix = torch.randint(high, (batch_size,))
+    x = torch.stack([torch.from_numpy(tokens[i:i + seq].astype(np.int64)) for i in ix])
+    y = torch.stack([torch.from_numpy(tokens[i + 1:i + 1 + seq].astype(np.int64)) for i in ix])
+    return x.to(device), y.to(device)
+
+
 def masked_ce(logits, y, m):
     ce = F.cross_entropy(logits.reshape(-1, logits.size(-1)).float(),
                          y.reshape(-1), reduction="none")
@@ -57,10 +67,21 @@ def main() -> None:
     ap.add_argument("--init", required=True, help="预训练检查点（如 checkpoints-wiki/latest.pt）")
     ap.add_argument("--data_dir", default=str(ROOT / "data/sft"))
     ap.add_argument("--out_dir", default=str(ROOT / "checkpoints-sft"))
-    ap.add_argument("--max_iters", type=int, default=3000)
+    ap.add_argument("--max_iters", type=int, default=4000)
     ap.add_argument("--batch_size", type=int, default=8)
     ap.add_argument("--seq_len", type=int, default=512)
-    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--lr", type=float, default=2e-5)
+    ap.add_argument("--replay_bin", default=str(ROOT / "data/wiki/train.bin"),
+                    help="预训练语料（replay / 混合训练用）")
+    ap.add_argument("--replay_prob", type=float, default=0.2)
+    ap.add_argument("--core_bin", default=str(ROOT / "data/wiki/core_topup.bin"),
+                    help="核心记忆语料；和 SFT、预训练一起混着练")
+    ap.add_argument("--p_core", type=float, default=0.0,
+                    help="每步走核心记忆的概率（>0 时启用三路混合训练）")
+    ap.add_argument("--p_pretrain", type=float, default=None,
+                    help="每步走预训练语料的概率（默认沿用 --replay_prob）")
+    ap.add_argument("--val_bin", default=str(ROOT / "data/wiki/val.bin"))
+    ap.add_argument("--eval_every", type=int, default=500)
     ap.add_argument("--device", default="auto")
     args = ap.parse_args()
 
@@ -80,6 +101,57 @@ def main() -> None:
     mask = np.memmap(data_dir / "mask.bin", dtype=np.uint8, mode="r")
     tok = ByteBPETokenizer.load(data_dir / "tokenizer.json")
     print(f"[sft] 数据 {len(tokens):,} token，回答部分占比 {mask.mean()*100:.1f}%")
+
+    # ---- 三路混合训练：SFT 问答 / 核心记忆 / 预训练语料
+    # 分开两阶段训练一定会互相破坏（练记忆就把语言练坏，练语言就把记忆冲掉），
+    # 所以干脆每一步都从三个分布里抽一个。
+    p_pre = args.replay_prob if args.p_pretrain is None else args.p_pretrain
+
+    def _mm(path: str, label: str):
+        p = Path(path)
+        if not p.exists():
+            print(f"[sft] 警告：找不到{label}语料 {p}")
+            return None
+        return np.memmap(p, dtype=np.uint32, mode="r")
+
+    mix = []                                   # [(name, memmap, prob)]
+    if args.p_core > 0:
+        core_mm = _mm(args.core_bin, "核心记忆")
+        if core_mm is not None:
+            mix.append(("core", core_mm, args.p_core))
+    if p_pre > 0:
+        pre_mm = _mm(args.replay_bin, "预训练")
+        if pre_mm is not None:
+            mix.append(("pretrain", pre_mm, p_pre))
+    p_sft = max(0.0, 1.0 - sum(p for _, _, p in mix))
+    print("[sft] 混合比例：SFT {:.0%}".format(p_sft)
+          + "".join(f" / {n} {p:.0%}" for n, _, p in mix))
+    counts = {"sft": 0, **{n: 0 for n, _, _ in mix}}
+    mix_map = {n: mm for n, mm, _ in mix}
+    for n, mm, _ in mix:
+        print(f"[sft]   {n}: {len(mm):,} token")
+
+    # ---- 验证集：固定切片，用来监控「有没有把预训练能力练坏」
+    val = None
+    vp = Path(args.val_bin)
+    if vp.exists():
+        val = np.memmap(vp, dtype=np.uint32, mode="r")
+
+    def eval_val(n: int = 4) -> float | None:
+        if val is None:
+            return None
+        model.eval()
+        tot = 0.0
+        with torch.no_grad():
+            for k in range(n):
+                i = 100_000 + k * T
+                x = torch.tensor(np.asarray(val[i:i + T]).astype(np.int64), device=device)[None]
+                y = torch.tensor(np.asarray(val[i + 1:i + 1 + T]).astype(np.int64), device=device)[None]
+                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+                    logits, _ = model(x)
+                tot += F.cross_entropy(logits.reshape(-1, logits.size(-1)).float(), y.reshape(-1)).item()
+        model.train()
+        return tot / n
 
     model = XingChen(cfg.model).to(device)
     model.load_state_dict(ckpt["model"])
@@ -128,10 +200,24 @@ def main() -> None:
         for g in opt.param_groups:
             g["lr"] = lr
         opt.zero_grad(set_to_none=True)
-        x, y, m = get_batch(tokens, mask, B, T, device)
-        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
-            logits, _ = model(x)
-            loss = masked_ce(logits, y, m)
+        r = random.random()
+        chosen, acc = "sft", 0.0
+        for name, _, p in mix:
+            acc += p
+            if r < acc:
+                chosen = name
+                break
+        counts[chosen] += 1
+        if chosen == "sft":
+            x, y, m = get_batch(tokens, mask, B, T, device)
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+                logits, _ = model(x)
+                loss = masked_ce(logits, y, m)
+        else:
+            x, y = get_lm_batch(mix_map[chosen], B, T, device)
+            with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+                logits, _ = model(x)
+                loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)).float(), y.reshape(-1))
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
@@ -142,8 +228,9 @@ def main() -> None:
 
         if (it + 1) % 10 == 0 or it == 0:
             dt = time.time() - t0
+            mix_str = "/".join(f"{n}{counts[n]}" for n in counts)
             print(f"[sft] iter {it:6d} | loss {loss_acc/ (10 if it else 1):.4f} | lr {lr:.2e} "
-                  f"| {tokens_seen/max(dt,1e-6)/1000:.1f}k tok/s")
+                  f"| {tokens_seen/max(dt,1e-6)/1000:.1f}k tok/s | 混合 {mix_str}")
             jlog({"type": "train", "iter": it + 1, "loss": round(loss_acc / (10 if it else 1), 4),
                   "mtp": None, "lr": lr, "tok_s": round(tokens_seen / max(dt, 1e-6)),
                   "load_dev": None,
@@ -151,6 +238,12 @@ def main() -> None:
             t0 = time.time()
             tokens_seen = 0
             loss_acc = 0.0
+
+        if (it + 1) % args.eval_every == 0:
+            vl = eval_val()
+            if vl is not None:
+                print(f"[sft] iter {it:6d} | 验证 loss {vl:.4f}")
+                jlog({"type": "eval", "iter": it + 1, "val_loss": round(vl, 4)})
 
         if (it + 1) % 1000 == 0:
             sample_answers()

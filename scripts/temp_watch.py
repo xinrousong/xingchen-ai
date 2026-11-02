@@ -50,9 +50,12 @@ def nvidia_query(fields: str) -> str:
 def find_training_pid() -> int | None:
     """找到占用显卡的 python 进程（即训练进程）。"""
     try:
+        # 和 nvidia_query 一样：没有控制台时必须屏蔽子进程窗口，
+        # 否则「找不到训练进程」时会每 5 秒弹一个黑窗（就是用户看到的闪窗）。
+        _no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         out = subprocess.run(
             ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader"],
-            capture_output=True, text=True, timeout=8).stdout.strip()
+            capture_output=True, text=True, timeout=8, creationflags=_no_window).stdout.strip()
     except Exception:
         return None
     for line in out.splitlines():

@@ -10,8 +10,8 @@ if not exist data\dpo mkdir data\dpo
 
 echo [%DATE% %TIME%] === M1.6 chain start === >> logs\m16_chain.log
 
-echo [%DATE% %TIME%] stage 1/4: build preference pairs (300 prompts x 4 samples) >> logs\m16_chain.log
-"%PY%" -u scripts\build_dpo_pairs.py --prompts 300 --samples 4 --max_new 72 --out data\dpo\pairs.jsonl >> logs\m16_pairs.log 2>&1
+echo [%DATE% %TIME%] stage 1/4: build preference pairs (150 prompts x 3 samples) >> logs\m16_chain.log
+"%PY%" -u scripts\build_dpo_pairs.py --prompts 150 --samples 3 --max_new 60 --out data\dpo\pairs.jsonl >> logs\m16_pairs.log 2>&1
 if errorlevel 1 (
   echo [%DATE% %TIME%] stage 1 FAILED >> logs\m16_chain.log
   exit /b 1

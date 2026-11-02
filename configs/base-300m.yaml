@@ -1,0 +1,56 @@
+# 星辰 · base-300M（本机 8GB 的上限尝试）
+# 相对 166M：dim 768→1024、层数 10→12、专家 12→12 但更宽（expert_dim 384→448）
+# 显存靠 M3.2 的梯度检查点 + batch 1 撑住；seq 512
+name: xingchen-base-300m
+
+model:
+  vocab_size: 16384
+  dim: 1024
+  n_layers: 12
+  n_heads: 16
+  ffn: moe
+  first_k_dense: 1
+  dense_intermediate: 2560
+  tie_embeddings: true
+  mla:
+    q_lora_rank: 640
+    kv_lora_rank: 320
+    qk_nope_head_dim: 64
+    qk_rope_head_dim: 32
+    v_head_dim: 64
+  moe:
+    n_routed: 12
+    n_shared: 2
+    top_k: 4
+    expert_dim: 448
+    balance_gamma: 0.001
+  mtp:
+    enabled: true
+    loss_weight: 0.3
+  hc:
+    enabled: true
+    n_streams: 2
+    sinkhorn_iters: 20
+    alpha_init: 0.01
+
+train:
+  seq_len: 512
+  batch_size: 1
+  grad_accum: 16            # 等效 batch = 1 × 512 × 16 = 8192 token/步
+  max_iters: 36000
+  lr: 3.0e-4
+  min_lr: 3.0e-5
+  warmup_iters: 500
+  weight_decay: 0.1
+  eval_interval: 1000
+  eval_iters: 10
+  ckpt_interval: 2000
+  sample_interval: 6000
+  amp: bf16
+  grad_checkpoint: true
+  out_dir: checkpoints-base-300m
+
+data:
+  tokenizer_path: data/wiki/tokenizer.json
+  train_bin: data/wiki/train.bin
+  val_bin: data/wiki/val.bin

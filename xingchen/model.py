@@ -21,6 +21,7 @@ from typing import List, Optional
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.utils.checkpoint import checkpoint as _ckpt
 
 # 快速路径开关（默认开）。环境变量可逐项回退，便于 A/B 与回归对照：
 #   XINGCHEN_MOE_DISPATCH=loop    → 用原来的逐专家 Python 分发
@@ -434,6 +435,7 @@ class XingChen(nn.Module):
             self.lm_head.weight = self.embed.weight
         self.mtp = MTPModule(cfg, self.rotary) if cfg.mtp.enabled else None
         self.use_hc = cfg.hc.enabled
+        self.grad_checkpoint = False      # 由 train.py 按 cfg.train.grad_checkpoint 打开
         self.moe_layers: List[MoEFeedForward] = [m for m in self.modules() if isinstance(m, MoEFeedForward)]
         self._init_weights()
 
@@ -454,6 +456,16 @@ class XingChen(nn.Module):
                 nn.init.normal_(module.down_proj.weight, std=std / math.sqrt(n_res))
 
     # ---------------------------------------------------------------- 前向
+    def _run_layer(self, layer, *args):
+        """M3.2 梯度检查点：不保存每层中间激活，反向时重算一遍，用算力换显存。
+
+        只在训练（且需要梯度）时生效；推理/生成走原路径，行为不变。
+        use_reentrant=False：支持未使用全部输入的情况（这里 lc/offset 可能是非张量）。
+        """
+        if self.grad_checkpoint and self.training and torch.is_grad_enabled():
+            return _ckpt(layer, *args, use_reentrant=False)
+        return layer(*args)
+
     def forward(self, idx: torch.Tensor, cache: Optional[XingChenCache] = None):
         B, T = idx.shape
         offset = cache.length if cache is not None else 0
@@ -469,12 +481,12 @@ class XingChen(nn.Module):
             streams[..., 0, :] = x                      # 主流载入嵌入，其余流从零开始
             for i, layer in enumerate(self.layers):
                 lc = cache.layers[i] if cache is not None else None
-                streams = layer(streams, cos, sin, lc, offset)
+                streams = self._run_layer(layer, streams, cos, sin, lc, offset)
             h = streams[..., 0, :]                      # 读主流送输出头
         else:
             for i, layer in enumerate(self.layers):
                 lc = cache.layers[i] if cache is not None else None
-                x = layer(x, cos, sin, lc, offset)
+                x = self._run_layer(layer, x, cos, sin, lc, offset)
             h = x
 
         h = self.final_norm(h)
