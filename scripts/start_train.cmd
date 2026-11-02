@@ -21,7 +21,7 @@ echo   out_dir: %OUT%
 echo ============================================================
 if not exist logs mkdir logs
 
-echo [watchdog] starting (pause >=80C, kill >=90C)
+echo [watchdog] starting (pause at 80C, kill at 90C)
 start "xc-watch" /min cmd /c ""%PY%" -u scripts\temp_watch.py >> logs\watchdog.out.log 2>&1"
 
 netstat -ano | findstr ":8765" | findstr "LISTENING" >nul

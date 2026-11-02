@@ -15,7 +15,7 @@ echo   3000 steps, lr 2e-5  -- roughly 15-70 min depending on GPU load
 echo ============================================================
 echo.
 
-echo [watchdog] starting (pause >=80C, kill >=90C)
+echo [watchdog] starting (pause at 80C, kill at 90C)
 start "xc-watch" /min cmd /c ""%PY%" -u scripts\temp_watch.py >> logs\watchdog.out.log 2>&1"
 
 netstat -ano | findstr ":8765" | findstr "LISTENING" >nul
