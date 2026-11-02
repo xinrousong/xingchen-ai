@@ -15,7 +15,7 @@ set "PATH=%PYDIR%\Scripts;%CUDA_HOME%\bin;%PATH%"
 set "DISTUTILS_USE_SDK=1"
 REM python_embeded is an embeddable build: it ships no include/ or libs/.
 REM Borrow headers + import libs from the same-version system CPython (3.13.14).
-set "PYSYS=C:\Users\Xinrou\AppData\Local\Programs\Python\Python313"
+set "PYSYS=%LOCALAPPDATA%\Programs\Python\Python313"
 if exist "%PYSYS%\include\Python.h" (
   set "INCLUDE=%PYSYS%\include;%INCLUDE%"
   set "LIB=%PYSYS%\libs;%LIB%"

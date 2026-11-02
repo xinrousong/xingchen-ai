@@ -123,6 +123,54 @@ $PY scripts/train.py --config configs/tiny-wiki.yaml
 ## 参考
 
 - DeepSeek LLM: arXiv:2401.02954 · DeepSeekMoE: arXiv:2401.06066
-- DeepSeek-V2 (MLA): arXiv:2405.04434 · DeepSeek-V3: arXiv:2412.19437
+- DeepSeek-V2 (MLA): arXiv:2405.04434 · DeepSeek-V3 (MoE/MTP): arXiv:2412.19437
 - mHC (V4 超连接): arXiv:2512.24880
 - DeepSeek 开源基础设施: github.com/deepseek-ai（FlashMLA / DeepEP / DeepGEMM / 3FS）
+
+## 开源说明
+
+**许可**：代码 MIT（见 [LICENSE](LICENSE)）；`data/core/` 下的宪法/故事/问答是作者的创作内容，按 CC BY-SA 4.0 提供。
+
+**这个仓库里有什么、没有什么**：
+
+| 有 | 没有（因为体积或授权） |
+|---|---|
+| 全部手写代码（约 2600 行） | 模型权重（`*.pt`，单文件 1.7 GB） |
+| 配置、训练日志曲线（`checkpoints-*/train_log.jsonl`） | 语料与 token 流（`data/wiki/`、`data/sft/`） |
+| 评测脚本与历史成绩（`logs/eval_history.log`） | 第三方 SFT 数据（alpaca-zh，仅本地用于研究） |
+| 记忆内容（宪法/故事/问答） | — |
+
+**复现一次训练的最小步骤**：
+
+```bash
+# 1) 准备语料（需要自己下载中文维基 parquet 分片）
+python scripts/build_wiki_corpus.py --max_mb 1000
+python scripts/prepare_data.py --corpus data/wiki/corpus.txt --vocab_size 16384 \
+       --out_dir data/wiki --core_dir data/core --core_repeat 20 --workers 8
+
+# 2) 预训练（166M，8GB 笔记本约 18 小时 / 3 亿 token）
+python scripts/train.py --config configs/base-wiki.yaml
+
+# 3) 对话微调（60% SFT / 10% 核心记忆 / 30% 预训练，防遗忘）
+python scripts/train_sft.py --init checkpoints-base-wiki/latest.pt \
+       --out_dir checkpoints-sft-mix --batch_size 2 --max_iters 3000 --lr 2e-5 \
+       --p_core 0.1 --p_pretrain 0.3
+
+# 4) 评测
+python scripts/core_check.py --ckpt checkpoints-sft-mix/latest.pt
+python scripts/eval_suite.py --ckpt checkpoints-sft-mix/latest.pt --sft
+python scripts/chat_check.py --ckpt checkpoints-sft-mix/latest.pt --sft
+```
+
+**实测成绩**（166M / 3 亿 token，RTX 5060 Laptop 8GB）：
+
+| 指标 | 数值 |
+|---|---|
+| 预训练验证 loss | 3.06（起步 4.05） |
+| 认知考试（31 题记忆） | 最高 18/31 |
+| 固定考卷（52 题） | 20/52 |
+| 训练吞吐 | 4.5k tok/s（seq 512，batch 2×accum 8） |
+
+**已知局限**：常识与英文接近零（语料只有中文维基 3 亿 token）；166M 容量下「记忆」与「泛化」互斥，加记忆会挤掉对话灵活性。想突破这个上限需要更大参数 + 更多语料（见 [ROADMAP.md](ROADMAP.md)）。
+
+**贡献**：欢迎提 Issue 讨论架构与数据配方。这个项目的定位是「每一行都能读懂的全栈 LLM 实验台」，请优先保证可读性。

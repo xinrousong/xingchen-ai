@@ -1,3 +1,4 @@
+import os
 # -*- coding: utf-8 -*-
 """工具链冒烟测试：先编一个 C++ 扩展，再编一个 CUDA 扩展，确认整条链路可用。
 
@@ -6,12 +7,13 @@ python_embeded 是 embeddable 发行版，没有 include/ 和 libs/，
 """
 import sys
 import time
+from pathlib import Path
 
 import torch
 from torch.utils.cpp_extension import load_inline
 
-PY_INC = r"C:\Users\Xinrou\AppData\Local\Programs\Python\Python313\include"
-PY_LIB = r"C:\Users\Xinrou\AppData\Local\Programs\Python\Python313\libs"
+PY_INC = str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Python/Python313/include")
+PY_LIB = str(Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Python/Python313/libs")
 COMMON = dict(
     extra_include_paths=[PY_INC],
     extra_ldflags=[f"/LIBPATH:{PY_LIB}"],
