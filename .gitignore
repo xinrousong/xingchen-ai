@@ -34,3 +34,6 @@ Thumbs.db
 desktop.ini
 
 temp_watch.log
+
+# ---- 私有记忆内容（含个人设定，不入库；模板见 constitution.example.txt）----
+data/core/constitution.txt
