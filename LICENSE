@@ -19,15 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----------------------------------------------------------------------------
-说明（中文）
----------------------------------------------------------------------------
-本许可覆盖本仓库中的**源代码**（xingchen/、scripts/、fastbpe/、configs/）。
-
-仓库中的创作内容（data/core/ 下的宪法、故事、问答）版权归作者所有，
-按 CC BY-SA 4.0 提供：https://creativecommons.org/licenses/by-sa/4.0/
-
-模型权重不在本仓库中。若要分发训练好的权重，请一并注明其训练语料来源：
-- 中文维基百科（CC BY-SA）
-- alpaca-zh（仅用于研究，不再分发原始数据）
