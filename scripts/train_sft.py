@@ -14,7 +14,9 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import random
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -56,10 +58,36 @@ def get_lm_batch(tokens: np.memmap, batch_size: int, seq_len: int, device: torch
     return x.to(device), y.to(device)
 
 
+def chunked_ce(logits: torch.Tensor, y: torch.Tensor, chunk: int = 256,
+               mask: torch.Tensor | None = None) -> torch.Tensor:
+    """分块交叉熵。mask 为 None 时等价 `F.cross_entropy`，否则只统计 mask 为真的位置。
+
+    为什么必须分块：SFT 默认 batch 8 × seq 512 × 词表 16384 = 6700 万个数，
+    一次性 `logits.view(-1, V).float()` 会多出 **256 MB** 的 float32 副本，
+    在 8GB 卡上足以把 SFT 直接推到 OOM（预训练那边已经踩过、改过了）。
+    分块后峰值降到 chunk×V×4 ≈ 16 MB，代价只是多几次 kernel 启动。
+    """
+    v = logits.size(-1)
+    flat_l = logits.reshape(-1, v)
+    flat_y = y.reshape(-1)
+    n = flat_y.numel()
+    flat_m = None if mask is None else mask.reshape(-1)
+    total = None
+    for i in range(0, n, chunk):
+        ce = F.cross_entropy(flat_l[i:i + chunk].float(),
+                             flat_y[i:i + chunk], reduction="none")
+        if flat_m is not None:
+            ce = ce * flat_m[i:i + chunk]
+        part = ce.sum()
+        total = part if total is None else total + part
+    if total is None:
+        return torch.zeros((), device=logits.device, dtype=torch.float32)
+    return total / (flat_m.sum().clamp_min(1.0) if flat_m is not None else n)
+
+
 def masked_ce(logits, y, m):
-    ce = F.cross_entropy(logits.reshape(-1, logits.size(-1)).float(),
-                         y.reshape(-1), reduction="none")
-    return (ce * m.reshape(-1)).sum() / m.sum().clamp_min(1.0)
+    """只对回答位置计 loss（原实现一次性 float()，见 chunked_ce 的说明）。"""
+    return chunked_ce(logits, y, chunk=256, mask=m)
 
 
 def main() -> None:
@@ -217,7 +245,17 @@ def main() -> None:
             x, y = get_lm_batch(mix_map[chosen], B, T, device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
                 logits, _ = model(x)
-                loss = F.cross_entropy(logits.reshape(-1, logits.size(-1)).float(), y.reshape(-1))
+                loss = chunked_ce(logits, y)
+        # 发散立即停：SFT 的 lr 小，但坏样本/极端 mask 仍可能一步炸掉，
+        # 继续跑只会把后续存档全写成 NaN
+        if not torch.isfinite(loss):
+            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
+                        "config": cfg.to_dict(), "loss": float(loss),
+                        "source": chosen}, out_dir / "nan.pt")
+            print(f"[sft] ✗ iter {it} loss={float(loss)} 出现 NaN/Inf（来源 {chosen}），"
+                  f"现场已存到 nan.pt，训练中止。")
+            jlog({"type": "nan", "iter": it + 1, "loss": float(loss)})
+            return
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
@@ -249,20 +287,28 @@ def main() -> None:
             sample_answers()
 
         if (it + 1) % 1500 == 0 or it + 1 == args.max_iters:
+            state = {"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
+                     "config": cfg.to_dict(),
+                     "rng_torch": torch.get_rng_state(),
+                     "rng_numpy": np.random.get_state(),
+                     "rng_python": random.getstate(),
+                     "tokenizer_path": str(ROOT / cfg.data.tokenizer_path)}
+            latest = out_dir / "latest.pt"
+            tmp = out_dir / ".latest.pt.tmp"
+            # 先写临时文件再原子替换：直接覆盖时断电会留下半个 latest.pt，
+            # torch.load 抛异常，几小时的 SFT 成果全废
+            try:
+                torch.save(state, tmp)
+                os.replace(tmp, latest)
+            finally:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
             path = out_dir / f"ckpt_{it+1:06d}.pt"
-            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
-                        "config": cfg.to_dict(),
-                        "rng_torch": torch.get_rng_state(),
-                        "rng_numpy": np.random.get_state(),
-                        "rng_python": random.getstate(),
-                        "tokenizer_path": str(ROOT / cfg.data.tokenizer_path)}, path)
-            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
-                        "config": cfg.to_dict(),
-                        "rng_torch": torch.get_rng_state(),
-                        "rng_numpy": np.random.get_state(),
-                        "rng_python": random.getstate(),
-                        "tokenizer_path": str(ROOT / cfg.data.tokenizer_path)},
-                       out_dir / "latest.pt")
+            try:
+                path.unlink(missing_ok=True)
+                os.link(latest, path)       # 硬链接：零拷贝零额外空间
+            except OSError:
+                shutil.copy2(latest, path)
             print(f"[sft] 已保存 {path.name}")
 
     jlog({"type": "done", "iters": args.max_iters})
