@@ -1,0 +1,67 @@
+# 星辰 · base 预训练配置（1B 语料版，2026-11-16）
+#
+# 与 base-wiki.yaml（3 亿 token / 36000 步）的区别只有三处：
+#   1. max_iters 122000 ≈ 10 亿 token（8192 token/步），配 corpus-v2 的 1B 语料；
+#   2. hc.sinkhorn_iters 20 → 6（mHC 每层 40 个小 kernel，降到 6 次省约 70% 开销）；
+#   3. grad_checkpoint 与 ce_chunk 同时开，用显存换 micro-batch 上限。
+#
+# 用法（8GB 卡，约 62 小时；可分晚跑，--resume 自动接续）：
+#   python scripts/train.py --config configs/base-wiki-1b.yaml
+#
+# 注意：换语料后必须重新对齐验证基线。旧 data/wiki/val.bin 对应的 loss 3.123902
+#       只适用于旧 val；新语料请重新生成 val 并记录新基线，不要拿旧数字比。
+
+name: xingchen-base-1b
+
+model:
+  vocab_size: 16384
+  dim: 768
+  n_layers: 10
+  n_heads: 12
+  ffn: moe
+  first_k_dense: 1
+  dense_intermediate: 1920
+  tie_embeddings: true
+  mla:
+    q_lora_rank: 512
+    kv_lora_rank: 256
+    qk_nope_head_dim: 64
+    qk_rope_head_dim: 32
+    v_head_dim: 64
+  moe:
+    n_routed: 12
+    n_shared: 2
+    top_k: 4
+    expert_dim: 384
+    balance_gamma: 0.001
+  mtp:
+    enabled: true
+    loss_weight: 0.3
+  hc:
+    enabled: true
+    n_streams: 2            # 显存考虑从 4 降到 2（V4 论文为 4）
+    sinkhorn_iters: 6       # ↓ 从 20 降到 6：双随机性略降，kernel 数省 70%
+    alpha_init: 0.01
+
+train:
+  seq_len: 512
+  batch_size: 2
+  grad_accum: 8             # 等效 batch = 2 × 512 × 8 = 8192 token/步
+  max_iters: 122000         # ≈ 10.0 亿 token
+  lr: 3.0e-4
+  min_lr: 3.0e-5
+  warmup_iters: 1000        # 数据量变大，warmup 也相应拉长
+  weight_decay: 0.1
+  eval_interval: 2000
+  eval_iters: 20
+  ckpt_interval: 4000       # 约 7300 万 token 一存
+  sample_interval: 10000
+  amp: bf16
+  grad_checkpoint: true
+  ce_chunk: 256             # CE 分块，峰值显存按 256 token 摊薄
+  out_dir: checkpoints-base-1b
+
+data:
+  tokenizer_path: data/wiki/tokenizer.json
+  train_bin: data/wiki/train.bin
+  val_bin: data/wiki/val.bin

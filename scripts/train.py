@@ -41,6 +41,28 @@ def lr_at(it: int, cfg) -> float:
     return cfg.train.min_lr + 0.5 * (cfg.train.lr - cfg.train.min_lr) * (1 + math.cos(math.pi * t))
 
 
+def ce_loss(logits: torch.Tensor, targets: torch.Tensor, chunk: int = 256) -> torch.Tensor:
+    """分块 cross_entropy：把 [B*T, V] 的 fp32 临时张量切成若干块算，峰值显存线性下降。
+
+    为什么要分块：vocab 16384、B*T=1024 时一次性 `.float()` 会生成 1024×16384 的
+    fp32 张量（约 67 MB），是 8GB 卡上 micro-batch 上不去的直接原因之一。
+    数学上等价：每块 reduction="sum"，最后除以 token 数，与一次性 mean 相同。
+    精度上等价：每块仍用 fp32 计算，没有把 bf16 直接喂给 log_softmax。
+    """
+    vocab = logits.size(-1)
+    flat_logits = logits.reshape(-1, vocab)
+    flat_targets = targets.reshape(-1)
+    n = flat_targets.numel()
+    if chunk <= 0 or n <= chunk:
+        return F.cross_entropy(flat_logits.float(), flat_targets)
+    total = flat_logits.new_zeros(())          # 标量累加，保留 fp32
+    for start in range(0, n, chunk):
+        piece = flat_logits[start:start + chunk].float()
+        total = total + F.cross_entropy(piece, flat_targets[start:start + chunk],
+                                        reduction="sum")
+    return total / n
+
+
 def sample_text(model, tok, cfg, device) -> str:
     ids = tok.encode("星辰", add_bos=True)
     out = generate(model, ids, max_new_tokens=80, temperature=0.8,
@@ -196,14 +218,12 @@ def main() -> None:
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
                 logits, h = model(x)
                 # y 已是右移一位的标签：logits[t] 直接对 y[t]
-                loss_main = F.cross_entropy(logits.reshape(-1, logits.size(-1)).float(),
-                                            y.reshape(-1))
+                loss_main = ce_loss(logits, y, chunk=cfg.train.ce_chunk)
                 loss = loss_main
                 if model.mtp is not None and cfg.model.mtp.loss_weight > 0:
                     # MTP：h[t] 与 x[t+1] 配对，预测 x[t+2] = y[t+1]
                     m_logits = model.mtp_forward(h[:, :-1], x[:, 1:])
-                    loss_mtp = F.cross_entropy(m_logits.reshape(-1, m_logits.size(-1)).float(),
-                                               y[:, 1:].reshape(-1))
+                    loss_mtp = ce_loss(m_logits, y[:, 1:], chunk=cfg.train.ce_chunk)
                     loss = loss + cfg.model.mtp.loss_weight * loss_mtp
                     loss_mtp_acc += loss_mtp.item()
             (loss / cfg.train.grad_accum).backward()

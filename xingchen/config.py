@@ -108,6 +108,7 @@ class TrainConfig:
     log_interval: int = 10
     amp: str = "bf16"                # "bf16" | "off"
     grad_checkpoint: bool = False    # 梯度检查点：显存换算力，用于 seq 1024
+    ce_chunk: int = 256              # cross_entropy 分块大小（0=不分块）：省峰值显存
     seed: int = 2026
     out_dir: str = "checkpoints"
 

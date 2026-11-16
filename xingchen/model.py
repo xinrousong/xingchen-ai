@@ -71,16 +71,39 @@ def apply_rope(x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.T
 
 
 class Expert(nn.Module):
-    """SwiGLU 专家。"""
+    """SwiGLU 专家（gate/up 合并成一次 GEMM）。
+
+    为什么合并：两个 [N,768]×[768,384] 的 GEMM 换成一个 [N,768]×[768,768]，
+    FLOPs 完全一样，但少一次 kernel 启动。小 micro-batch（1024 token）下
+    kernel 启动开销占比很高，这一步是纯赚。
+
+    权重布局：[2*hidden, dim]，前 hidden 行是 gate，后 hidden 行是 up。
+    旧权重兼容：`_load_from_state_dict` 会把 gate_proj/up_proj 拼成合并权重，
+    所以 10-31 之前的所有 checkpoint 都能原样加载（数值逐位一致）。
+    """
 
     def __init__(self, dim: int, hidden: int):
         super().__init__()
-        self.gate_proj = nn.Linear(dim, hidden, bias=False)
-        self.up_proj = nn.Linear(dim, hidden, bias=False)
+        self.gate_up_proj = nn.Linear(dim, 2 * hidden, bias=False)
         self.down_proj = nn.Linear(hidden, dim, bias=False)
+        self.hidden = hidden
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
+        gu = self.gate_up_proj(x)
+        gate, up = gu.chunk(2, dim=-1)
+        return self.down_proj(F.silu(gate) * up)
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                             missing_keys, unexpected_keys, error_msgs):
+        gk = prefix + "gate_proj.weight"
+        uk = prefix + "up_proj.weight"
+        nk = prefix + "gate_up_proj.weight"
+        if gk in state_dict and uk in state_dict and nk not in state_dict:
+            state_dict[nk] = torch.cat([state_dict[gk], state_dict[uk]], dim=0)
+            state_dict.pop(gk, None)
+            state_dict.pop(uk, None)
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
 
 
 class DenseFeedForward(nn.Module):

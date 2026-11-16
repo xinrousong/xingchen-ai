@@ -8,23 +8,47 @@
 | 文件 | 大小 | SHA256 | 说明 |
 |---|---|---|---|
 | `checkpoints-base-wiki/latest.pt` | 1,997,199,103 B（1.86 GB） | `24525a64b9d326c88158878b407e6a67c3893b2718c402bbb28edc8e4cd921d8` | **base 重修终版**：iter 36000，验证 loss 3.06 |
-| `E:\xingchen\checkpoints-base-final\latest-36000.pt` | 同上 | 同上 | 上面那个的备份（同字节） |
+| `checkpoints-sft-mix2/latest.pt` | 1,871,014,607 B（1.74 GB） | `87e1a060c219c356d062cae3c56392517d95f47d150268693aaed8fc68cb6e73` | **当前最好可用模型**：三路混合 SFT，iter 3000，core_check 18✅/13❌ |
 | `checkpoints-sft-v2/latest.pt` | 684,864,655 B（653 MB） | `5d3d71c52d3eef60cda9d804a34c118b8a78fa7aad91687457cdb0e9a790de2d` | tiny 对话版（SFT + 记忆巩固到 12400 步） |
 | `checkpoints-wiki/latest.pt` | 684,864,655 B（653 MB） | `5266e2f8b2c248665de79c63d7b41737082671ba89343a77c11e31f789988ffa` | tiny 预训练底模（72000 步） |
 
-**校验方法**（PowerShell）：
+**校验方法**（PowerShell / Git Bash）：
 
 ```powershell
 (Get-FileHash 'checkpoints-base-wiki\latest.pt' -Algorithm SHA256).Hash.ToLower()
 ```
+```bash
+sha256sum checkpoints-base-wiki/latest.pt
+```
 
-## 二、语料与 token 流（E 盘，可重建）
+### 备份位置（2026-11-15 更新，盘符已核实）
+
+> ⚠️ 早期文档写的 `E:\xingchen\` 是**同一块移动盘**，重新插上后盘符变成 **`F:`**。
+> 按老路径找会扑空，实际位置如下（已逐文件 SHA256 核对，与上表一致）：
+
+| 备份文件 | 大小 | 说明 |
+|---|---|---|
+| `F:\xingchen\checkpoints-base-final\latest-36000.pt` | 1.9 GB | base 36000，哈希 `24525a64…` ✅ |
+| `F:\xingchen\checkpoints-20261115\checkpoints-sft-mix2_latest.pt` | 1.74 GB | 当前最优，哈希 `87e1a060…` ✅ |
+| `F:\xingchen\checkpoints-20261115\checkpoints-sft-v2_latest.pt` | 653 MB | 哈希 `5d3d71c5…` ✅ |
+| `F:\xingchen\checkpoints-20261115\checkpoints-wiki_latest.pt` | 653 MB | 哈希 `5266e2f8…` ✅ |
+| `F:\xingchen\core\` | 448 KB | 宪法 + 3 个故事 + 问答 + 使用说明（**本地曾丢失，已从这份恢复**） |
+
+
+## 二、语料与 token 流（F 盘备份，可重建）
 
 | 文件 | 大小 | SHA256 | 说明 |
 |---|---|---|---|
-| `E:\xingchen\data\wiki\train.bin` | 1,219,357,056 B（1.16 GB） | `11e28641ddb68cedc636102fcff18a2f33bbbd6998c26586d42a97783cf38d4e` | 3.05 亿 token 训练流（含核心记忆注入） |
-| `E:\xingchen\data\wiki\corpus.txt` | 1,016,869,001 B（970 MB） | `756790035d95d8fec3c2a132c27b4b3caaeb8d370bd681190d86297ea1d9a6df` | 原始中文维基文本（`=DOC=` 分隔） |
-| `E:\xingchen\data\wiki\raw\*.parquet` | 1.08 GB（5 片） | — | 维基原始分片，`corpus.txt` 由它生成 |
+| `F:\xingchen\data\wiki\train.bin` | 1,219,357,056 B（1.16 GB） | `11e28641ddb68cedc636102fcff18a2f33bbbd6998c26586d42a97783cf38d4e` | 3.05 亿 token 训练流（含核心记忆注入） |
+| `F:\xingchen\data\wiki\corpus.txt` | 1,016,869,001 B（970 MB） | `756790035d95d8fec3c2a132c27b4b3caaeb8d370bd681190d86297ea1d9a6df` | 原始中文维基文本（`=DOC=` 分隔） |
+| `F:\xingchen\data\wiki\raw\*.parquet` | 1.08 GB（5 片） | — | 维基原始分片，`corpus.txt` 由它生成 |
+| `F:\xingchen\data\sft\{tokens.bin,mask.bin}` | 46.7 MB | — | SFT 编码流（本地已删，仅备份） |
+| `F:\xingchen\data\sft_raw\alpaca-zh.json` | 33.5 MB | — | alpaca-zh 原始数据（本地已删，仅备份） |
+| `F:\xingchen\data\wiki\val.bin` | 11.75 MB | — | 验证集（**本地 `data/wiki/val.bin` 与它同源，loss 基线依赖**） |
+
+> 2026-11-15 实测：`train.bin` 与 `latest-36000.pt` 的 SHA256 均与上表一致，备份有效。
+> 本地 `data/wiki/train.bin` 在 11-04 清理中被删，**需从 F 盘取回**（迁移方案 P1）。
+
 
 重建方式：`python scripts/build_wiki_corpus.py --max_mb 1000` → `python scripts/prepare_data.py --corpus data/wiki/corpus.txt --vocab_size 16384 --out_dir data/wiki --init_tokenizer data/wiki/tokenizer.json --core_dir data/core --core_repeat 20 --workers 8`
 
