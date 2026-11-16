@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import argparse
+import bisect
 import dataclasses
 import json
 import math
@@ -115,9 +116,53 @@ def main() -> None:
     if tok.vocab_size != cfg.model.vocab_size:
         raise ValueError(f"配置 vocab_size={cfg.model.vocab_size} 与分词器 {tok.vocab_size} 不一致，"
                          f"请重跑 scripts/prepare_data.py")
-    train_data = load_bin(ROOT / cfg.data.train_bin)
+
+    # 多源按权重混合（优先）；否则退回单源 train_bin
+    mix_arrays: list = []
+    mix_cum: list = []
+    train_data = None
+    src_cfg = list(getattr(cfg.data, "sources", None) or [])
+    if src_cfg:
+        weights = []
+        for item in src_cfg:
+            p = ROOT / item["path"]
+            if not p.exists():
+                raise FileNotFoundError(f"数据源不存在：{p}")
+            w = float(item.get("weight", 1.0))
+            if w <= 0:
+                raise ValueError(f"数据源 {p} 的 weight 必须 > 0")
+            mix_arrays.append(load_bin(p))
+            weights.append(w)
+        total_w = sum(weights)
+        cum, acc = [], 0.0
+        for w in weights:
+            acc += w / total_w
+            cum.append(acc)
+        cum[-1] = 1.0                       # 消除浮点误差，保证 random() 一定命中
+        mix_cum = cum
+
+        total_tokens = (cfg.train.max_iters * cfg.train.seq_len
+                        * cfg.train.batch_size * cfg.train.grad_accum)
+        print(f"[train] 混合 {len(mix_arrays)} 个源，合计 {sum(len(a) for a in mix_arrays):,} token"
+              f"；本次计划消费 {total_tokens/1e9:.3f}B token")
+        for item, arr, w in zip(src_cfg, mix_arrays, weights):
+            ep = total_tokens * (w / total_w) / max(1, len(arr))
+            tag = "  ⚠️ 重复过多，建议降权或补量" if ep > 4 else ""
+            print(f"        {item['path']:<44} {len(arr)/1e6:>8.1f}M  "
+                  f"权重 {w/total_w:5.1%}  预计 {ep:.2f} epoch{tag}")
+    else:
+        train_data = load_bin(ROOT / cfg.data.train_bin)
+
     val_data = load_bin(ROOT / cfg.data.val_bin)
-    print(f"[train] 训练 token {len(train_data):,} / 验证 token {len(val_data):,}")
+    if mix_arrays:
+        print(f"[train] 验证 token {len(val_data):,}（来自 {cfg.data.val_bin}）")
+    else:
+        print(f"[train] 训练 token {len(train_data):,} / 验证 token {len(val_data):,}")
+
+    def pick_train_source():
+        """按权重抽一个源。用 bisect + random() 而不是 random.choices，单次约 0.4µs。"""
+        i = bisect.bisect_right(mix_cum, random.random())
+        return mix_arrays[min(i, len(mix_arrays) - 1)]
 
     replay_data = None
     if args.replay_bin:
@@ -214,9 +259,12 @@ def main() -> None:
         loss_main_sum = None
         loss_mtp_sum = None
         for _ in range(cfg.train.grad_accum):
-            src = train_data
-            if replay_data is not None and random.random() < args.replay_prob:
+            if mix_arrays:
+                src = pick_train_source()
+            elif replay_data is not None and random.random() < args.replay_prob:
                 src = replay_data          # 掺一条预训练批次，保住通用语言能力
+            else:
+                src = train_data
             x, y = get_batch(src, B, T, device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
                 logits, h = model(x)

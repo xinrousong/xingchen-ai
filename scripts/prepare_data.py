@@ -171,9 +171,21 @@ def main() -> None:
         print(f"[prepare] 复用分词器：{tok_path}（合并 {len(tok.merges):,} 条）")
     else:
         tok = ByteBPETokenizer(vocab_size=args.vocab_size)
-        tok.train("\n\n".join(sample), max_chars=(args.tokenizer_max_chars or None))
+        merged_text = "\n\n".join(sample)
+        t_tok = time.time()
+        tok.train(merged_text, max_chars=(args.tokenizer_max_chars or None))
         tok.save(tok_path)
-        print(f"[prepare] 分词器已保存：{tok_path}（词表 {args.vocab_size}，合并 {len(tok.merges):,} 条）")
+        print(f"[prepare] 分词器已保存：{tok_path}（词表 {args.vocab_size}，合并 {len(tok.merges):,} 条，"
+              f"耗时 {time.time()-t_tok:.0f}s）")
+        # 词表没跑满 = 训练样本不足，后半段词表是空的。这个判断以前没法做，
+        # 因为纯 Python 训练根本喂不起大样本；向量化之后才可能"喂够"。
+        target = args.vocab_size - 256 - len(tok.specials)
+        if len(tok.merges) < target * 0.92:
+            print(f"[prepare] ⚠️ 只训出 {len(tok.merges):,}/{target:,} 条合并"
+                  f"（{len(tok.merges)/target:.0%}）：样本不足以填满 {args.vocab_size} 词表，"
+                  f"多出来的词表位置是浪费。\n"
+                  f"          两条路：① 加大 --sample_mb / --tokenizer-max-chars；"
+                  f"② 把 --vocab_size 降到约 {int(len(tok.merges)*1.05)+259:,}。")
 
     arrays = encode_docs_parallel(docs, tok_path, args.workers)
     eos = np.array([tok.eos_id], dtype=np.uint32)

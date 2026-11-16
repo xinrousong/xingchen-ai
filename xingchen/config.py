@@ -118,6 +118,9 @@ class DataConfig:
     tokenizer_path: str = "data/tokenizer.json"
     train_bin: str = "data/train.bin"
     val_bin: str = "data/val.bin"
+    # 多源按权重混合：[{path: data/xx.bin, weight: 0.4}, ...]
+    # 非空时优先于 train_bin（train_bin 仅作为单源回退），权重大小任意，内部归一化。
+    sources: list = field(default_factory=list)
 
 
 @dataclass

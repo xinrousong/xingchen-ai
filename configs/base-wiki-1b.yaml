@@ -63,5 +63,17 @@ train:
 
 data:
   tokenizer_path: data/wiki/tokenizer.json
+  # 单源（旧方式）：直接用 train_bin
   train_bin: data/wiki/train.bin
   val_bin: data/wiki/val.bin
+  # 多源按权重混合（推荐）：sources 非空时忽略 train_bin，权重内部归一化。
+  # 训练启动时会为每个源打印「预计 epoch 数」，>4 会标 ⚠️ —— 那是"该降权或补量"的信号，
+  # 不是错误。权重按目标配比给即可，不必凑成 1.0。
+  # sources:
+  #   - {path: data/mix/zh_wiki.bin,   weight: 0.20}
+  #   - {path: data/mix/zh_books.bin,  weight: 0.18}
+  #   - {path: data/mix/zh_web.bin,    weight: 0.25}
+  #   - {path: data/mix/zh_dialog.bin, weight: 0.05}
+  #   - {path: data/mix/en_web.bin,    weight: 0.20}
+  #   - {path: data/mix/code.bin,      weight: 0.09}
+  #   - {path: data/mix/math.bin,      weight: 0.03}
