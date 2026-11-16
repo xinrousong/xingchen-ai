@@ -35,5 +35,12 @@ desktop.ini
 
 temp_watch.log
 
-# ---- 私有记忆内容（含个人设定，不入库；模板见 constitution.example.txt）----
+# ---- 私有记忆内容（含个人设定与私人文字，不入库；模板见 constitution.example.txt）----
+# 她的宪法 / 故事 / 问答 / 演示语料都含个人细节，只留在本机，不进任何远端
 data/core/constitution.txt
+data/core/stories/
+data/core/qa/
+data/sample_corpus.txt
+# 修订过程的本地备份与说明（同样是私人内容）
+data/core_backup_*/
+data/core_修订说明_*.md
