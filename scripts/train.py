@@ -35,6 +35,7 @@ import torch.nn.functional as F
 
 from xingchen import XingChen, load_config, get_batch, load_bin, param_summary, generate
 from xingchen.tokenizer import ByteBPETokenizer
+from xingchen.io_utils import atomic_replace, safe_unlink
 
 
 def lr_at(it: int, cfg) -> float:
@@ -427,12 +428,11 @@ def main() -> None:
             tmp = out_dir / ".latest.pt.tmp"
             # 先写临时文件再原子替换。直接覆盖 latest.pt 时若断电/崩溃，留下的
             # 是半个文件——torch.load 会直接抛异常，几十小时的训练成果全部作废。
-            try:
-                torch.save(state, tmp)
-                os.replace(tmp, latest)
-            finally:
-                if tmp.exists():
-                    tmp.unlink(missing_ok=True)
+            # atomic_replace 内含 Windows 文件锁重试：torch.save 刚写完 2GB 文件时
+            # 会被 Defender 实时扫描锁住，直接 os.replace 会 WinError 5。
+            torch.save(state, tmp)
+            atomic_replace(tmp, latest)
+            safe_unlink(tmp)
 
             path = out_dir / f"ckpt_{it+1:06d}.pt"
             try:

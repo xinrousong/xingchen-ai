@@ -33,6 +33,7 @@ import torch.nn.functional as F
 from xingchen import XingChen, generate
 from xingchen.config import XingChenConfig, _merge_dataclass
 from xingchen.tokenizer import ByteBPETokenizer
+from xingchen.io_utils import atomic_replace, safe_unlink
 
 SAMPLE_QUESTIONS = ["你好，请介绍一下你自己。", "地球为什么有四季变化？", "用一句话解释什么是人工智能。"]
 
@@ -296,13 +297,11 @@ def main() -> None:
             latest = out_dir / "latest.pt"
             tmp = out_dir / ".latest.pt.tmp"
             # 先写临时文件再原子替换：直接覆盖时断电会留下半个 latest.pt，
-            # torch.load 抛异常，几小时的 SFT 成果全废
-            try:
-                torch.save(state, tmp)
-                os.replace(tmp, latest)
-            finally:
-                if tmp.exists():
-                    tmp.unlink(missing_ok=True)
+            # torch.load 抛异常，几小时的 SFT 成果全废。
+            # atomic_replace 内含 Windows 文件锁重试（Defender 会锁住刚写完的大文件）。
+            torch.save(state, tmp)
+            atomic_replace(tmp, latest)
+            safe_unlink(tmp)
             path = out_dir / f"ckpt_{it+1:06d}.pt"
             try:
                 path.unlink(missing_ok=True)
