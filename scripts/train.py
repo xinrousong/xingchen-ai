@@ -208,8 +208,11 @@ def main() -> None:
             g["lr"] = lr
 
         opt.zero_grad(set_to_none=True)
-        loss_main_acc = 0.0
-        loss_mtp_acc = 0.0
+        # 用 0-dim 张量累加 loss，整步只在最后同步一次。
+        # 原来每个 micro-step 都调 .item()（grad_accum=8 就是 8 次），每次都会
+        # 等 GPU 队列排空，等于把 micro-step 之间的流水线切断——这是纯浪费。
+        loss_main_sum = None
+        loss_mtp_sum = None
         for _ in range(cfg.train.grad_accum):
             src = train_data
             if replay_data is not None and random.random() < args.replay_prob:
@@ -225,10 +228,15 @@ def main() -> None:
                     m_logits = model.mtp_forward(h[:, :-1], x[:, 1:])
                     loss_mtp = ce_loss(m_logits, y[:, 1:], chunk=cfg.train.ce_chunk)
                     loss = loss + cfg.model.mtp.loss_weight * loss_mtp
-                    loss_mtp_acc += loss_mtp.item()
+                    loss_mtp_sum = (loss_mtp.detach() if loss_mtp_sum is None
+                                    else loss_mtp_sum + loss_mtp.detach())
             (loss / cfg.train.grad_accum).backward()
-            loss_main_acc += loss_main.item()
+            loss_main_sum = (loss_main.detach() if loss_main_sum is None
+                             else loss_main_sum + loss_main.detach())
             tokens_seen += x.numel()
+
+        loss_main_acc = loss_main_sum.item()          # 全步唯一一次同步
+        loss_mtp_acc = loss_mtp_sum.item() if loss_mtp_sum is not None else 0.0
 
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
         opt.step()

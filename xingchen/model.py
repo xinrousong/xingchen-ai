@@ -532,8 +532,12 @@ class XingChen(nn.Module):
     # ---------------------------------------------------------------- 负载均衡
     @torch.no_grad()
     def update_expert_bias(self, gamma: float) -> Optional[float]:
-        """V3 无辅助损失均衡：负载偏高的专家下调偏置，偏低的上调。返回最大负载偏差。"""
-        max_dev = None
+        """V3 无辅助损失均衡：负载偏高的专家下调偏置，偏低的上调。返回最大负载偏差。
+
+        注意：原来每层都 `.item()`（9 层 = 9 次强制同步），改成先收集 0-dim 张量、
+        最后一次 `.item()`，把同步次数从 9 降到 1。
+        """
+        devs = []
         for moe in self.moe_layers:
             total = moe.expert_counts.sum()
             if total == 0:
@@ -541,10 +545,11 @@ class XingChen(nn.Module):
             load = moe.expert_counts.float() / total
             target = moe.top_k / moe.n_routed
             moe.e_bias += gamma * torch.sign(target - load)
-            dev = (load - target).abs().max().item()
-            max_dev = dev if max_dev is None else max(max_dev, dev)
+            devs.append((load - target).abs().max())      # 先留张量，不同步
             moe.expert_counts.zero_()
-        return max_dev
+        if not devs:
+            return None
+        return torch.stack(devs).max().item()             # 全模型只同步 1 次
 
     def expert_load_stats(self) -> Optional[float]:
         """当前窗口内专家负载的最大相对偏差（0 = 完美均衡）。"""
