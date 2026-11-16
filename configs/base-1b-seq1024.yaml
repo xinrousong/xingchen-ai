@@ -57,6 +57,7 @@ train:
   eval_interval: 1000
   eval_iters: 20
   ckpt_interval: 2000
+  keep_ckpts: 3
   sample_interval: 4000
   amp: bf16
   grad_checkpoint: true     # seq 1024 必须开

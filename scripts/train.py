@@ -14,9 +14,12 @@ from __future__ import annotations
 import argparse
 import bisect
 import dataclasses
+import hashlib
 import json
 import math
+import os
 import random
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -62,6 +65,15 @@ def ce_loss(logits: torch.Tensor, targets: torch.Tensor, chunk: int = 256) -> to
         total = total + F.cross_entropy(piece, flat_targets[start:start + chunk],
                                         reduction="sum")
     return total / n
+
+
+def _file_sha(path: Path) -> str:
+    """文件 SHA256。用来防止"换了分词器还拿旧 ckpt 续训"这种静默灾难。"""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def sample_text(model, tok, cfg, device) -> str:
@@ -116,6 +128,7 @@ def main() -> None:
     if tok.vocab_size != cfg.model.vocab_size:
         raise ValueError(f"配置 vocab_size={cfg.model.vocab_size} 与分词器 {tok.vocab_size} 不一致，"
                          f"请重跑 scripts/prepare_data.py")
+    tok_sha = _file_sha(tok_path)
 
     # 多源按权重混合（优先）；否则退回单源 train_bin
     mix_arrays: list = []
@@ -159,6 +172,24 @@ def main() -> None:
     else:
         print(f"[train] 训练 token {len(train_data):,} / 验证 token {len(val_data):,}")
 
+    # 分域验证集（可选）：多源训练下只报一个总 loss 看不出哪一层在退化
+    val_sets: list = []
+    val_cfg = list(getattr(cfg.data, "val_sources", None) or [])
+    if val_cfg:
+        for item in val_cfg:
+            p = ROOT / item["path"]
+            if not p.exists():
+                raise FileNotFoundError(f"验证源不存在：{p}")
+            name = item.get("name") or p.stem
+            arr = load_bin(p)
+            if len(arr) < cfg.train.seq_len + 1:
+                raise ValueError(f"验证源 {p} 只有 {len(arr):,} token，不足一个 seq_len")
+            val_sets.append((name, arr))
+        print(f"[train] 分域验证 {len(val_sets)} 个："
+              + "、".join(f"{n}({len(a)/1e6:.1f}M)" for n, a in val_sets))
+    else:
+        val_sets.append((Path(cfg.data.val_bin).stem, val_data))
+
     def pick_train_source():
         """按权重抽一个源。用 bisect + random() 而不是 random.choices，单次约 0.4µs。"""
         i = bisect.bisect_right(mix_cum, random.random())
@@ -166,12 +197,15 @@ def main() -> None:
 
     replay_data = None
     if args.replay_bin:
-        rp = Path(args.replay_bin)
-        if rp.exists():
-            replay_data = load_bin(rp)
-            print(f"[train] replay：{len(replay_data):,} token，每 batch {args.replay_prob:.0%} 概率掺入")
+        if mix_arrays:
+            print("[train] 注意：已配置 data.sources（多源混合），--replay_bin 被忽略")
         else:
-            print(f"[train] 警告：找不到 replay 语料 {rp}，本次不掺")
+            rp = Path(args.replay_bin)
+            if rp.exists():
+                replay_data = load_bin(rp)
+                print(f"[train] replay：{len(replay_data):,} token，每 batch {args.replay_prob:.0%} 概率掺入")
+            else:
+                print(f"[train] 警告：找不到 replay 语料 {rp}，本次不掺")
 
     # ---------------- 模型与优化器
     model = XingChen(cfg.model).to(device)
@@ -205,6 +239,17 @@ def main() -> None:
     start_iter = 0
     if args.resume:
         ckpt = torch.load(args.resume, map_location="cpu", weights_only=False)
+        old_sha = ckpt.get("tokenizer_sha")
+        if old_sha and old_sha != tok_sha:
+            # 词表大小一致但内容不同时，load_state_dict 不会报错——id 的语义已经变了，
+            # 训练会继续"正常"进行，loss 也能降，但学到的是错位映射，几周后才发现。
+            raise ValueError(
+                f"分词器与 checkpoint 不匹配，拒绝续训：\n"
+                f"  ckpt  : {ckpt.get('tokenizer_path')}\n"
+                f"          sha256={old_sha[:16]}\n"
+                f"  当前  : {tok_path}\n"
+                f"          sha256={tok_sha[:16]}\n"
+                f"换过分词器就必须从头训；要接着跑原实验，请把 tokenizer_path 指回原来那份。")
         model.load_state_dict(ckpt["model"])
         opt.load_state_dict(ckpt["opt"])
         start_iter = ckpt["iter"] + 1
@@ -225,23 +270,44 @@ def main() -> None:
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-    open(log_path, "w", encoding="utf-8").close()
+    # resume 时**不要**清空日志：那会把此前几十小时的训练曲线一起删掉。
+    # 只在从零开始时覆盖，续训接着追加（monitor.py 按 iter 读，重复的 iter 不会出现）。
+    if start_iter == 0:
+        open(log_path, "w", encoding="utf-8").close()
     jlog({"type": "meta", "name": cfg.name, "params_m": round(stats["total"] / 1e6, 2),
           "vocab": cfg.model.vocab_size, "seq": T, "batch": B,
           "max_iters": cfg.train.max_iters, "device": str(device)})
 
-    def eval_val() -> float:
+    def eval_val() -> dict:
+        """分域验证，返回 {域名字: loss}。
+
+        验证 loss 也走 ce_loss（分块），而不是原来那句一次性
+        `cross_entropy(logits.view(-1, V).float())`——两者数学等价（verify_opt 已逐位验证），
+        但分块版峰值显存低得多，能避免"训练刚好不 OOM、一 eval 就 OOM"。
+        多源时 eval 成本按源数线性上升，eval_iters 是**每源各跑**这么多次。
+        """
         model.eval()
-        losses = []
-        with torch.no_grad():
-            for _ in range(cfg.train.eval_iters):
-                x, y = get_batch(val_data, B, T, device)
-                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
-                    logits, _ = model(x)
-                    losses.append(F.cross_entropy(logits.view(-1, logits.size(-1)).float(),
-                                                  y.reshape(-1)).item())
-        model.train()
-        return sum(losses) / len(losses)
+        # 固定验证窗口。原先 eval 用随机窗口，"模型变好"和"这批窗口恰好更难"会混在
+        # 一起，val loss 抖 0.02 时根本分不清是进步还是噪声。固定种子后每次 eval
+        # 抽到同一批窗口，跨机也能复现。get_batch 用的是 CPU 侧 torch.randint，
+        # 所以只需保存/恢复 CPU 的 RNG 状态。
+        rng_state = torch.get_rng_state()
+        torch.manual_seed(cfg.train.seed * 31 + 7)
+        out = {}
+        try:
+            with torch.no_grad():
+                for name, arr in val_sets:
+                    losses = []
+                    for _ in range(cfg.train.eval_iters):
+                        x, y = get_batch(arr, B, T, device)
+                        with torch.autocast("cuda", dtype=torch.bfloat16, enabled=use_amp):
+                            logits, _ = model(x)
+                            losses.append(ce_loss(logits, y, chunk=cfg.train.ce_chunk).item())
+                    out[name] = sum(losses) / len(losses)
+        finally:
+            torch.set_rng_state(rng_state)
+            model.train()
+        return out
 
     # ---------------- 训练循环
     model.train()
@@ -286,6 +352,18 @@ def main() -> None:
         loss_main_acc = loss_main_sum.item()          # 全步唯一一次同步
         loss_mtp_acc = loss_mtp_sum.item() if loss_mtp_sum is not None else 0.0
 
+        # NaN/Inf 立即停：8 天训练若在第 3 天发散，继续跑只是浪费电，
+        # 而且会一路把正常 ckpt 覆盖成 NaN 权重。留一份现场供事后查。
+        if not (math.isfinite(loss_main_acc) and math.isfinite(loss_mtp_acc)):
+            nan_path = out_dir / "nan.pt"
+            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
+                        "config": cfg.to_dict(), "loss": loss_main_acc,
+                        "rng_torch": torch.get_rng_state()}, nan_path)
+            print(f"[train] ✗ iter {it} loss={loss_main_acc} / mtp={loss_mtp_acc} 出现 NaN/Inf，"
+                  f"现场已存到 {nan_path.name}，训练中止。")
+            jlog({"type": "nan", "iter": it + 1, "loss": loss_main_acc})
+            return
+
         torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.train.grad_clip)
         opt.step()
         max_dev = model.update_expert_bias(cfg.model.moe.balance_gamma) if model.moe_layers else None
@@ -295,7 +373,11 @@ def main() -> None:
             tps = tokens_seen / max(dt, 1e-6)
             mtp_str = f" | mtp {loss_mtp_acc / cfg.train.grad_accum:.3f}" if loss_mtp_acc else ""
             bal_str = f" | 负载偏差 {max_dev:.3f}" if max_dev is not None else ""
-            mem = (f" | 显存 {torch.cuda.max_memory_allocated()/2**30:.2f}GB" if device.type == "cuda" else "")
+            mem = ""
+            if device.type == "cuda":
+                cur = torch.cuda.memory_allocated() / 2**30
+                peak = torch.cuda.max_memory_allocated() / 2**30
+                mem = f" | 显存 {cur:.2f}/{peak:.2f}GB"      # 当前/本区间峰值
             print(f"[train] iter {it:6d} | loss {loss_main_acc/cfg.train.grad_accum:.4f}{mtp_str}"
                   f" | lr {lr:.2e} | {tps/1000:.1f}k tok/s{bal_str}{mem}")
             jlog({"type": "train", "iter": it + 1,
@@ -304,28 +386,59 @@ def main() -> None:
                   "lr": lr, "tok_s": round(tps),
                   "load_dev": round(max_dev, 4) if max_dev is not None else None,
                   "vram_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2) if device.type == "cuda" else None})
+            if device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats()   # 让下一区间重新统计，不显示历史最高
             t0 = time.time()
             tokens_seen = 0
 
         if (it + 1) % cfg.train.eval_interval == 0:
-            vl = eval_val()
-            print(f"[train] iter {it:6d} | 验证 loss {vl:.4f}")
-            jlog({"type": "eval", "iter": it + 1, "val_loss": round(vl, 4)})
+            vls = eval_val()
+            head_name = val_sets[0][0]
+            head = vls[head_name]
+            # 多源时把其余域接在后面，一行看完；单源时 extra 为空，输出与旧版一致
+            extra = "".join(f" | {n} {v:.4f}" for n, v in vls.items() if n != head_name)
+            print(f"[train] iter {it:6d} | 验证 loss {head:.4f}（{head_name}）{extra}")
+            jlog({"type": "eval", "iter": it + 1, "val_loss": round(head, 4),
+                  "val_by_domain": {k: round(v, 4) for k, v in vls.items()}})
 
         if (it + 1) % cfg.train.sample_interval == 0:
             print("[sample] " + sample_text(model, tok, cfg, device).replace("\n", " ⏎ "))
 
         if (it + 1) % cfg.train.ckpt_interval == 0 or it + 1 == cfg.train.max_iters:
+            # 磁盘预算：保留 N 个定期档 + latest，每个约 1.9GB。不够就先喊，别等写爆。
+            keep = int(getattr(cfg.train, "keep_ckpts", 0) or 0)
+            free_gb = shutil.disk_usage(out_dir).free / 2**30
+            need_gb = 1.9 * (keep + 1 if keep > 0 else 2)
+            if free_gb < need_gb:
+                print(f"[train] ⚠️ 磁盘仅剩 {free_gb:.1f}GB，低于本次需要的约 {need_gb:.1f}GB")
+
+            state = {"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
+                     "config": cfg.to_dict(), "rng_torch": torch.get_rng_state(),
+                     "rng_numpy": np.random.get_state(), "rng_python": random.getstate(),
+                     "tokenizer_path": str(tok_path), "tokenizer_sha": tok_sha}
+            latest = out_dir / "latest.pt"
+            tmp = out_dir / ".latest.pt.tmp"
+            # 先写临时文件再原子替换。直接覆盖 latest.pt 时若断电/崩溃，留下的
+            # 是半个文件——torch.load 会直接抛异常，几十小时的训练成果全部作废。
+            try:
+                torch.save(state, tmp)
+                os.replace(tmp, latest)
+            finally:
+                if tmp.exists():
+                    tmp.unlink(missing_ok=True)
+
             path = out_dir / f"ckpt_{it+1:06d}.pt"
-            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
-                        "config": cfg.to_dict(), "rng_torch": torch.get_rng_state(),
-                        "rng_numpy": np.random.get_state(), "rng_python": random.getstate(),
-                        "tokenizer_path": str(tok_path)}, path)
-            torch.save({"model": model.state_dict(), "opt": opt.state_dict(), "iter": it,
-                        "config": cfg.to_dict(), "rng_torch": torch.get_rng_state(),
-                        "rng_numpy": np.random.get_state(), "rng_python": random.getstate(),
-                        "tokenizer_path": str(tok_path)}, out_dir / "latest.pt")
-            print(f"[train] 已保存 {path.name}")
+            try:
+                path.unlink(missing_ok=True)
+                os.link(latest, path)       # 硬链接：同一 inode，零拷贝零额外空间
+            except OSError:
+                shutil.copy2(latest, path)  # 跨盘或不支持硬链接时退化
+
+            if keep > 0:
+                for old in sorted(out_dir.glob("ckpt_*.pt"))[:-keep]:
+                    old.unlink(missing_ok=True)
+
+            print(f"[train] 已保存 {path.name}（保留最近 {keep or '全部'} 个）")
 
     jlog({"type": "done", "iters": cfg.train.max_iters})
     print(f"[train] 完成：{cfg.train.max_iters} iters，最终 ckpt 在 {out_dir/'latest.pt'}")

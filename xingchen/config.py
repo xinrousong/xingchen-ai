@@ -104,6 +104,9 @@ class TrainConfig:
     eval_interval: int = 200
     eval_iters: int = 20
     ckpt_interval: int = 500
+    keep_ckpts: int = 3              # 只保留最近 N 个 ckpt_XXXXXX.pt（0=全留）。
+                                     # 10 亿语料那跑是 122000/4000 = 30 个 × 1.9GB ≈ 58GB，
+                                     # 不留上限会把盘写爆。
     sample_interval: int = 200
     log_interval: int = 10
     amp: str = "bf16"                # "bf16" | "off"
@@ -121,6 +124,10 @@ class DataConfig:
     # 多源按权重混合：[{path: data/xx.bin, weight: 0.4}, ...]
     # 非空时优先于 train_bin（train_bin 仅作为单源回退），权重大小任意，内部归一化。
     sources: list = field(default_factory=list)
+    # 分域验证集：[{path: data/val_zh.bin, name: zh_web}, ...]
+    # 非空时每个源单独报 ppl。多源训练下单一 val 的 loss 会偏向那个语域的分布，
+    # 只有分域 ppl 才能看出"哪一层在变差"。
+    val_sources: list = field(default_factory=list)
 
 
 @dataclass

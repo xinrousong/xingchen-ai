@@ -55,6 +55,7 @@ train:
   eval_interval: 2000
   eval_iters: 20
   ckpt_interval: 4000       # 约 7300 万 token 一存
+  keep_ckpts: 3             # 只保留最近 3 个：31 个存档 × 1.9GB = 57GB 会写爆盘（只剩 49GB）
   sample_interval: 10000
   amp: bf16
   grad_checkpoint: true
