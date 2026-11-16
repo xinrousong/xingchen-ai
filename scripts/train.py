@@ -310,6 +310,11 @@ def main() -> None:
         return out
 
     # ---------------- 训练循环
+    # MTP 隔步：MTP 是一个完整 Block（含 MoE），约占前向算力 1/10。
+    # every=2 就省约 5% 总训练时间 —— 8 天的话是 9~10 小时。
+    mtp_every = max(1, int(getattr(cfg.model.mtp, "every", 1)))
+    if model.mtp is not None and mtp_every > 1:
+        print(f"[train] MTP 每 {mtp_every} 步跑一次：省约 {100 - 100 // mtp_every}% 的 MTP 算力，约占总前向的 {9 * (1 - 1 / mtp_every):.1f}%")
     model.train()
     t0 = time.time()
     tokens_seen = 0
@@ -318,6 +323,8 @@ def main() -> None:
         for g in opt.param_groups:
             g["lr"] = lr
 
+        use_mtp = (model.mtp is not None and cfg.model.mtp.loss_weight > 0
+                   and it % mtp_every == 0)
         opt.zero_grad(set_to_none=True)
         # 用 0-dim 张量累加 loss，整步只在最后同步一次。
         # 原来每个 micro-step 都调 .item()（grad_accum=8 就是 8 次），每次都会
@@ -337,7 +344,7 @@ def main() -> None:
                 # y 已是右移一位的标签：logits[t] 直接对 y[t]
                 loss_main = ce_loss(logits, y, chunk=cfg.train.ce_chunk)
                 loss = loss_main
-                if model.mtp is not None and cfg.model.mtp.loss_weight > 0:
+                if use_mtp:
                     # MTP：h[t] 与 x[t+1] 配对，预测 x[t+2] = y[t+1]
                     m_logits = model.mtp_forward(h[:, :-1], x[:, 1:])
                     loss_mtp = ce_loss(m_logits, y[:, 1:], chunk=cfg.train.ce_chunk)

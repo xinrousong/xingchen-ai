@@ -54,6 +54,10 @@ class MTPConfig:
     """
     enabled: bool = True
     loss_weight: float = 0.3
+    every: int = 1          # 每 N 步跑一次 MTP 分支。MTP 是一个完整 Block（含 MoE），
+                            # 约占前向算力 1/10；every=2 省约 5% 总时间，代价是
+                            # 辅助监督信号幅度减半（可用 loss_weight 补偿）。
+                            # 默认 1 = 每步都跑，行为与之前一致。
 
 
 @dataclass
