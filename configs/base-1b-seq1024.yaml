@@ -1,0 +1,69 @@
+# 星辰 · base 预训练配置（1B 语料 · seq 1024 适应版）
+
+# 用途：主体用 base-wiki-1b.yaml（seq 512）训完，再用这份做"长上下文适应"阶段。
+# 为什么分两段：注意力计算随 seq 平方增长，全程 1024 会让训练慢 1.6~2 倍；
+#   而长程能力只需要最后一段"教"她，不需要全程。这是长上下文扩展的标准做法。
+#
+# 前提：grad_checkpoint 必须开（seq 1024 不开会爆显存）；rope_base 放大到 40000，
+#   让位置编码的"分辨尺度"与更长的序列匹配（104 万 token 的适应阶段够它适应新尺度）。
+#
+# 用法（接在 base-wiki-1b 之后）：
+#   python scripts/train.py --config configs/base-1b-seq1024.yaml \
+#       --resume checkpoints-base-1b/latest.pt --out_dir checkpoints-base-1b-lc
+
+name: xingchen-base-1b-lc
+
+model:
+  vocab_size: 16384
+  dim: 768
+  n_layers: 10
+  n_heads: 12
+  ffn: moe
+  first_k_dense: 1
+  dense_intermediate: 1920
+  tie_embeddings: true
+  rope_base: 40000.0        # ↑ 从 10000 放大 4 倍，配合 seq 由 512 → 1024
+  max_seq_len: 4096
+  mla:
+    q_lora_rank: 512
+    kv_lora_rank: 256
+    qk_nope_head_dim: 64
+    qk_rope_head_dim: 32
+    v_head_dim: 64
+  moe:
+    n_routed: 12
+    n_shared: 2
+    top_k: 4
+    expert_dim: 384
+    balance_gamma: 0.001
+  mtp:
+    enabled: true
+    loss_weight: 0.3
+  hc:
+    enabled: true
+    n_streams: 2
+    sinkhorn_iters: 6
+    alpha_init: 0.01
+
+train:
+  seq_len: 1024
+  batch_size: 1             # 显存换长度：1 × 1024 × 8 = 8192 token/步，与 512 版等价
+  grad_accum: 8
+  max_iters: 16000          # 约 1.3 亿 token，占总量 13%，只做"适应"不做"重学"
+  lr: 1.0e-4                # 适应阶段降 lr，避免冲掉已学内容
+  min_lr: 1.0e-5
+  warmup_iters: 500
+  weight_decay: 0.1
+  eval_interval: 1000
+  eval_iters: 20
+  ckpt_interval: 2000
+  sample_interval: 4000
+  amp: bf16
+  grad_checkpoint: true     # seq 1024 必须开
+  ce_chunk: 128
+  out_dir: checkpoints-base-1b-lc
+
+data:
+  tokenizer_path: data/wiki/tokenizer.json
+  train_bin: data/wiki/train.bin
+  val_bin: data/wiki/val.bin

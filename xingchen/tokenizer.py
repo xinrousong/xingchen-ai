@@ -43,8 +43,24 @@ class ByteBPETokenizer:
         self._fast = None                      # C 加速引擎（可用时才非 None）
 
     # ------------------------------------------------------------------ 训练
-    def train(self, text: str, verbose: bool = True, log_every: int = 2048) -> None:
-        """在给定文本样本上训练合并规则。样本取语料的代表性切片即可（几 MB～几十 MB）。"""
+    def train(self, text: str, verbose: bool = True, log_every: int = 2048,
+              max_chars: int | None = None) -> None:
+        """在给定文本样本上训练合并规则。样本取语料的代表性切片即可（几 MB～几十 MB）。
+
+        `max_chars`：训练样本上限。合并计数只关心**频率分布**，等距抽样不会改变分布形状，
+        但能把训练时间压到常数级——16k 合并要几百 MB 是浪费，几 MB 就够了。
+        需要更大词表（32k+）时尤其重要：本实现训练是纯 Python（只有编码走 C 加速），
+        样本每翻一倍，耗时几乎翻一倍。
+        """
+        if max_chars and len(text) > max_chars:
+            seg = 2000
+            total = len(text) // seg
+            keep = max(1, max_chars // seg)
+            stride = max(1, total // keep)
+            text = "".join(text[i * seg:(i + 1) * seg] for i in range(0, total, stride))
+            if verbose:
+                print(f"[tokenizer] 样本超限，等距抽样至 {len(text):,} 字符（stride={stride}）")
+
         target_merges = self.vocab_size - 256 - len(SPECIALS)
         pieces: List[List[int]] = [list(p.encode("utf-8")) for p in _PIECE_RE.findall(text)]
         if verbose:

@@ -107,6 +107,9 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", required=True)
     ap.add_argument("--vocab_size", type=int, default=16384)
+    ap.add_argument("--tokenizer-max-chars", type=int, default=0,
+                    help="训练分词器的样本上限（0=不限）。32k 词表建议 400000~800000，"
+                         "纯 Python 训练下这个值直接决定耗时")
     ap.add_argument("--out_dir", default="data")
     ap.add_argument("--sample_mb", type=float, default=8.0,
                     help="用于训练分词器的文本量上限（MB，取语料开头切片）")
@@ -168,7 +171,7 @@ def main() -> None:
         print(f"[prepare] 复用分词器：{tok_path}（合并 {len(tok.merges):,} 条）")
     else:
         tok = ByteBPETokenizer(vocab_size=args.vocab_size)
-        tok.train("\n\n".join(sample))
+        tok.train("\n\n".join(sample), max_chars=(args.tokenizer_max_chars or None))
         tok.save(tok_path)
         print(f"[prepare] 分词器已保存：{tok_path}（词表 {args.vocab_size}，合并 {len(tok.merges):,} 条）")
 
