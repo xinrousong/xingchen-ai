@@ -129,16 +129,23 @@ $PY scripts/train.py --config configs/tiny-wiki.yaml
 
 ## 开源说明
 
-**许可**：代码 MIT（见 [LICENSE](LICENSE)）；`data/core/` 下的宪法/故事/问答是作者的创作内容，按 CC BY-SA 4.0 提供。
+**许可**：代码 MIT（见 [LICENSE](LICENSE)）。
+
+模型权重、训练语料，以及 `data/core/` 下的人格内容（宪法 / 故事 / 问答）**不在本仓库中，
+也不随本仓库授权**。仓库只收录 `constitution.example.txt` 作为格式模板——那是一份占位示例，
+不含任何真实人设。
 
 **这个仓库里有什么、没有什么**：
 
-| 有 | 没有（因为体积或授权） |
+| 有 | 没有 |
 |---|---|
-| 全部手写代码（约 2600 行） | 模型权重（`*.pt`，单文件 1.7 GB） |
-| 配置、训练日志曲线（`checkpoints-*/train_log.jsonl`） | 语料与 token 流（`data/wiki/`、`data/sft/`） |
-| 评测脚本与历史成绩（`logs/eval_history.log`） | 第三方 SFT 数据（alpaca-zh，仅本地用于研究） |
-| 记忆内容（宪法/故事/问答） | — |
+| 全部手写代码（约 3000 行，含 MLA / MoE / mHC / MTP） | 模型权重（`*.pt`，单文件 1.9 GB） |
+| 配置、评测脚本、架构文档与实验记录 | 训练语料与 token 流（`data/wiki/`、`data/sft/`） |
+| 人格内容的**格式模板**（`constitution.example.txt`、`使用说明.md`） | 实际的人格内容（属私人创作） |
+| C 加速的 BPE、数据管线、基准脚本 | 第三方 SFT 数据（alpaca-zh，仅本地研究使用） |
+
+> 每次训练的 `checkpoints-*/train_log.jsonl`（loss / lr / 吞吐 / 显存逐步记录）是**有意保留**的
+> 研究素材，单文件约 370 KB，可以直接对照不同配置的收敛情况。
 
 **复现一次训练的最小步骤**：
 
@@ -148,7 +155,7 @@ python scripts/build_wiki_corpus.py --max_mb 1000
 python scripts/prepare_data.py --corpus data/wiki/corpus.txt --vocab_size 16384 \
        --out_dir data/wiki --core_dir data/core --core_repeat 20 --workers 8
 
-# 2) 预训练（166M，8GB 笔记本约 18 小时 / 3 亿 token）
+# 2) 预训练（166M，8GB 笔记本约 14 小时 / 3 亿 token，batch 8 × accum 2）
 python scripts/train.py --config configs/base-wiki.yaml
 
 # 3) 对话微调（60% SFT / 10% 核心记忆 / 30% 预训练，防遗忘）

@@ -37,8 +37,9 @@ model:
 
 train:
   seq_len: 512
-  batch_size: 2
-  grad_accum: 8             # 等效 batch = 2 × 512 × 8 = 8192 token/步
+  batch_size: 8             # 实测 batch 8/accum 2 比 2/8 快 76%（3.4k → 6.0k tok/s）
+  grad_accum: 2             # 等效 batch = 8 × 512 × 2 = 8192 token/步，与 2×8 数学等价
+                            # （grad_accum 只是同一批平均梯度的分配方式），学习率不用改
   max_iters: 36000          # 目标总步数；--resume 会从上次存档继续
   lr: 3.0e-4
   min_lr: 3.0e-5

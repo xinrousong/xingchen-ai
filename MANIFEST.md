@@ -3,6 +3,10 @@
 > 生成于 2026-10-30。记录**不进 git 的大文件**（权重 / 语料）的位置、大小与 SHA256，
 > 方便以后校验完整性、确认“某个模型是哪一次训练出来的”。
 
+> 备份位置统一写作 `备份盘\`：原始记录指向一块移动硬盘，盘符随插拔变化
+> （早期记作 `E:`，后来是 `F:`，按老路径找会扑空）。公开版隐去盘符，只保留
+> 相对路径与 SHA256——哈希才是校验的依据，盘符没有意义。
+
 ## 一、模型权重（不在仓库里，用哈希校验）
 
 | 文件 | 大小 | SHA256 | 说明 |
@@ -23,28 +27,28 @@ sha256sum checkpoints-base-wiki/latest.pt
 
 ### 备份位置（2026-11-15 更新，盘符已核实）
 
-> ⚠️ 早期文档写的 `E:\xingchen\` 是**同一块移动盘**，重新插上后盘符变成 **`F:`**。
-> 按老路径找会扑空，实际位置如下（已逐文件 SHA256 核对，与上表一致）：
+> ⚠️ 这块移动硬盘的盘符会随插拔变化（早期 `E:`，后来 `F:`），按固定盘符找容易扑空。
+> 实际位置如下（已逐文件 SHA256 核对，与上表一致）：
 
 | 备份文件 | 大小 | 说明 |
 |---|---|---|
-| `F:\xingchen\checkpoints-base-final\latest-36000.pt` | 1.9 GB | base 36000，哈希 `24525a64…` ✅ |
-| `F:\xingchen\checkpoints-20261115\checkpoints-sft-mix2_latest.pt` | 1.74 GB | 当前最优，哈希 `87e1a060…` ✅ |
-| `F:\xingchen\checkpoints-20261115\checkpoints-sft-v2_latest.pt` | 653 MB | 哈希 `5d3d71c5…` ✅ |
-| `F:\xingchen\checkpoints-20261115\checkpoints-wiki_latest.pt` | 653 MB | 哈希 `5266e2f8…` ✅ |
-| `F:\xingchen\core\` | 448 KB | 宪法 + 3 个故事 + 问答 + 使用说明（**本地曾丢失，已从这份恢复**） |
+| `备份盘\checkpoints-base-final\latest-36000.pt` | 1.9 GB | base 36000，哈希 `24525a64…` ✅ |
+| `备份盘\checkpoints-20261115\checkpoints-sft-mix2_latest.pt` | 1.74 GB | 当前最优，哈希 `87e1a060…` ✅ |
+| `备份盘\checkpoints-20261115\checkpoints-sft-v2_latest.pt` | 653 MB | 哈希 `5d3d71c5…` ✅ |
+| `备份盘\checkpoints-20261115\checkpoints-wiki_latest.pt` | 653 MB | 哈希 `5266e2f8…` ✅ |
+| `备份盘\core\` | 448 KB | 人格内容与使用说明（**不入库**；本地曾丢失，已从这份恢复） |
 
 
-## 二、语料与 token 流（F 盘备份，可重建）
+## 二、语料与 token 流（备份盘，可重建）
 
 | 文件 | 大小 | SHA256 | 说明 |
 |---|---|---|---|
-| `F:\xingchen\data\wiki\train.bin` | 1,219,357,056 B（1.16 GB） | `11e28641ddb68cedc636102fcff18a2f33bbbd6998c26586d42a97783cf38d4e` | 3.05 亿 token 训练流（含核心记忆注入） |
-| `F:\xingchen\data\wiki\corpus.txt` | 1,016,869,001 B（970 MB） | `756790035d95d8fec3c2a132c27b4b3caaeb8d370bd681190d86297ea1d9a6df` | 原始中文维基文本（`=DOC=` 分隔） |
-| `F:\xingchen\data\wiki\raw\*.parquet` | 1.08 GB（5 片） | — | 维基原始分片，`corpus.txt` 由它生成 |
-| `F:\xingchen\data\sft\{tokens.bin,mask.bin}` | 46.7 MB | — | SFT 编码流（本地已删，仅备份） |
-| `F:\xingchen\data\sft_raw\alpaca-zh.json` | 33.5 MB | — | alpaca-zh 原始数据（本地已删，仅备份） |
-| `F:\xingchen\data\wiki\val.bin` | 11.75 MB | — | 验证集（**本地 `data/wiki/val.bin` 与它同源，loss 基线依赖**） |
+| `备份盘\data\wiki\train.bin` | 1,219,357,056 B（1.16 GB） | `11e28641ddb68cedc636102fcff18a2f33bbbd6998c26586d42a97783cf38d4e` | 3.05 亿 token 训练流（含核心记忆注入） |
+| `备份盘\data\wiki\corpus.txt` | 1,016,869,001 B（970 MB） | `756790035d95d8fec3c2a132c27b4b3caaeb8d370bd681190d86297ea1d9a6df` | 原始中文维基文本（`=DOC=` 分隔） |
+| `备份盘\data\wiki\raw\*.parquet` | 1.08 GB（5 片） | — | 维基原始分片，`corpus.txt` 由它生成 |
+| `备份盘\data\sft\{tokens.bin,mask.bin}` | 46.7 MB | — | SFT 编码流（本地已删，仅备份） |
+| `备份盘\data\sft_raw\alpaca-zh.json` | 33.5 MB | — | alpaca-zh 原始数据（本地已删，仅备份） |
+| `备份盘\data\wiki\val.bin` | 11.75 MB | — | 验证集（**本地 `data/wiki/val.bin` 与它同源，loss 基线依赖**） |
 
 > 2026-11-15 实测：`train.bin` 与 `latest-36000.pt` 的 SHA256 均与上表一致，备份有效。
 > 本地 `data/wiki/train.bin` 在 11-04 清理中被删，**需从 F 盘取回**（迁移方案 P1）。
