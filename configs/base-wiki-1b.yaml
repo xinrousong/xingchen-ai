@@ -5,7 +5,7 @@
 #   2. hc.sinkhorn_iters 20 → 6（mHC 每层 40 个小 kernel，降到 6 次省约 70% 开销）；
 #   3. grad_checkpoint 与 ce_chunk 同时开，用显存换 micro-batch 上限。
 #
-# 用法（8GB 卡，约 62 小时；可分晚跑，--resume 自动接续）：
+# 用法（8GB 卡，约 46 小时；可分晚跑，--resume 自动接续）：
 #   python scripts/train.py --config configs/base-wiki-1b.yaml
 #
 # 注意：换语料后必须重新对齐验证基线。旧 data/wiki/val.bin 对应的 loss 3.123902
@@ -45,8 +45,13 @@ model:
 
 train:
   seq_len: 512
-  batch_size: 2
-  grad_accum: 8             # 等效 batch = 2 × 512 × 8 = 8192 token/步
+  batch_size: 8             # 实测（RTX 5060 8GB, 621.24）：batch 8/accum 2 比 2/8 快 76%
+  grad_accum: 2             # 等效 batch = 8 × 512 × 2 = 8192 token/步（与旧配置完全一致，
+                            # 所以学习率不用改）。实测吞吐见下：
+                            #   batch 2 accum 8 → 3.4k tok/s, 3.32GB
+                            #   batch 4 accum 4 → 5.2k tok/s, 3.70GB
+                            #   batch 8 accum 2 → 6.0k tok/s, 4.35GB   ← 选这个
+                            #   batch16 accum 1 → 5.8~6.6k tok/s, 5.25GB（抖动大，余量小）
   max_iters: 122000         # ≈ 10.0 亿 token
   lr: 3.0e-4
   min_lr: 3.0e-5

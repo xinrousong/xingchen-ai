@@ -47,8 +47,12 @@ model:
 
 train:
   seq_len: 1024
-  batch_size: 1             # 显存换长度：1 × 1024 × 8 = 8192 token/步，与 512 版等价
-  grad_accum: 8
+  batch_size: 4             # 实测：batch 4/accum 2 比 1/8 快 2.5 倍
+  grad_accum: 2             # 4 × 1024 × 2 = 8192 token/步，与 seq512 版等价
+                            # 干跑实测（grad_checkpoint 开）：
+                            #   batch 1 → 2,541 tok/s, 3.08GB
+                            #   batch 2 → 5,088 tok/s, 3.14GB
+                            #   batch 4 → 6,443 tok/s, 3.25GB  ← 选这个
   max_iters: 16000          # 约 1.3 亿 token，占总量 13%，只做"适应"不做"重学"
   lr: 1.0e-4                # 适应阶段降 lr，避免冲掉已学内容
   min_lr: 1.0e-5
