@@ -40,7 +40,7 @@ def log(line: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--ckpt", default=str(ROOT / "checkpoints-sft-v2" / "latest.pt"))
-    ap.add_argument("--qa_dir", default=str(ROOT / "data/core/qa"))
+    ap.add_argument("--qa_dir", default=str(ROOT / "data/writings/qa"))
     ap.add_argument("--max_new", type=int, default=100)
     ap.add_argument("--temperature", type=float, default=0.3)
     ap.add_argument("--rep", type=float, default=1.0,

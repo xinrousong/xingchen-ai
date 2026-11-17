@@ -48,6 +48,10 @@ def main() -> None:
     ap.add_argument("--pretrain_iters", type=int, default=72000,
                     help="预训练目标总步数（从 24000 续训到该值）")
     ap.add_argument("--sft_iters", type=int, default=4500)
+    ap.add_argument("--with-persona", action="store_true",
+                    help="把 data/writings/ 的宪法与故事注入预训练，并做记忆巩固。"
+                         "默认关闭：人格由后期经历长出来，不靠前期灌输。"
+                         "开着会回到旧流程（反复背诵设定）。")
     ap.add_argument("--fresh", action="store_true",
                     help="清除完成标记完整重跑——更新了宪法/故事、想让她学习新记忆时用")
     args = ap.parse_args()
@@ -69,25 +73,29 @@ def main() -> None:
                             "--max_mb", "1000"], "corpus.log")
 
     # 2. 编码入库：train.bin 比 语料和核心记忆 都新则跳过
-    core_dir = ROOT / "data/core"
+    # 人格内容默认不参与预训练（见 --with-persona），因此不进入 mtime 判断
     newest_core = 0.0
-    if core_dir.exists():
-        newest_core = max((p.stat().st_mtime for p in core_dir.rglob("*") if p.is_file()),
-                          default=0.0)
+    if args.with_persona:
+        _wd = ROOT / "data/writings"
+        if _wd.exists():
+            newest_core = max((p.stat().st_mtime for p in _wd.rglob("*") if p.is_file()),
+                              default=0.0)
     if train_bin.exists() and train_bin.stat().st_mtime > corpus.stat().st_mtime \
             and train_bin.stat().st_mtime > newest_core:
         log("⏭ 编码入库 跳过（语料与核心记忆都没变）")
     else:
-        run_step("编码入库", [PY, "-u", "scripts/prepare_data.py",
-                            "--corpus", "data/wiki/corpus.txt",
-                            "--vocab_size", "16384", "--out_dir", "data/wiki",
-                            "--init_tokenizer", "data/wiki/tokenizer.json",
-                            "--core_dir", "data/core", "--core_repeat", "20",
-                            "--workers", "8"], "prepare.log")
+        cmd = [PY, "-u", "scripts/prepare_data.py",
+               "--corpus", "data/wiki/corpus.txt",
+               "--vocab_size", "16384", "--out_dir", "data/wiki",
+               "--init_tokenizer", "data/wiki/tokenizer.json",
+               "--workers", "8"]
+        if args.with_persona:
+            cmd += ["--core_dir", "data/writings", "--core_repeat", "20"]
+        run_step("编码入库", cmd, "prepare.log")
 
     # 2.5 SFT 数据（含核心问答；问答或指令数据有更新才重建）
     sft_tokens = ROOT / "data/sft/tokens.bin"
-    qa_dir = ROOT / "data/core/qa"
+    qa_dir = ROOT / "data/writings/qa"
     newest_qa = newest_core
     if sft_tokens.exists() and sft_tokens.stat().st_mtime > max(newest_qa, 0.0):
         log("⏭ SFT 数据 跳过（已是最新，含核心问答）")
@@ -119,7 +127,7 @@ def main() -> None:
     # 5. 记忆巩固：SFT 的大量新数据会冲掉背诵（灾难性遗忘），
     #    最后一步在"课文+问答混合"的密集集上短训，记忆和应题两头都保住
     topup_bin = ROOT / "data/wiki/core_topup.bin"
-    if topup_bin.exists() and not (LOGS / "topup.done").exists():
+    if args.with_persona and topup_bin.exists() and not (LOGS / "topup.done").exists():
         run_step("记忆巩固", [PY, "-u", "scripts/train.py",
                             "--config", "configs/tiny-wiki.yaml",
                             "--resume", "checkpoints-sft-v2/latest.pt",

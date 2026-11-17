@@ -118,11 +118,12 @@ def main() -> None:
     ap.add_argument("--val_min_tokens", type=int, default=4096)
     ap.add_argument("--init_tokenizer", default=None,
                     help="复用已有分词器文件（与旧检查点词表保持一致），跳过分词器训练")
-    ap.add_argument("--core_dir", default=str(ROOT / "data/core"),
-                    help="核心记忆目录（宪法+故事），会掺入语料；传空字符串可关闭")
+    ap.add_argument("--core_dir", default="",
+                    help="人格内容目录（宪法/故事）。默认空：不往预训练注入人格设定。"
+                         "作者本人的创作已独立放在 data/writings/，仅供参照，不参与训练。")
     ap.add_argument("--core_repeat", type=int, default=20,
                     help="核心记忆在语料中大约重复的份数（记忆强度，越大越牢固）")
-    ap.add_argument("--core_qa_dir", default=str(ROOT / "data/core/qa"),
+    ap.add_argument("--core_qa_dir", default=str(ROOT / "data/writings/qa"),
                     help="核心问答目录（用于生成课文+问答混合的巩固集）")
     args = ap.parse_args()
 

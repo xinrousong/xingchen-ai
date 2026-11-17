@@ -37,6 +37,8 @@ temp_watch.log
 
 # ---- 私有记忆内容（含个人设定与私人文字，不入库；模板见 constitution.example.txt）----
 # 她的宪法 / 故事 / 问答 / 演示语料都含个人细节，只留在本机，不进任何远端
+# 2026-11-17：作者本人的创作独立到 data/writings/，不再注入预训练
+data/writings/
 data/core/constitution.txt
 data/core/stories/
 data/core/qa/
