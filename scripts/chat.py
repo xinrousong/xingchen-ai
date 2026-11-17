@@ -39,6 +39,12 @@ def main() -> None:
     ap.add_argument("--sft", action="store_true",
                     help="对话模板模式：把输入包成「问：…答：」，用于 SFT 后的模型")
     ap.add_argument("--device", default="auto")
+    ap.add_argument("--persona", action="store_true",
+                    help="把 data/writings/ 当作她的读物：按话题挑相关段落塞进上下文。"
+                         "她读到会受影响，但不会进权重——这是读物，不是记忆")
+    ap.add_argument("--persona-budget", type=int, default=380,
+                    help="读物占用的字符上限（默认 380）。166M 的窗口只有 512~4096，"
+                         "留太少没内容、留太多会把问题挤出窗口")
     args = ap.parse_args()
 
     device = torch.device("cuda" if (args.device == "auto" and torch.cuda.is_available())
@@ -51,8 +57,28 @@ def main() -> None:
     print(f"[chat] 已加载 {args.ckpt}（iter {ckpt['iter']+1}，{cfg.name}），设备 {device}")
     print(f"[chat] 采样：temp={args.temperature} top_k={args.top_k} top_p={args.top_p} rep={args.rep}")
 
+    reader = None
+    if args.persona:
+        from xingchen.persona import PersonaReader
+        reader = PersonaReader(ROOT / "data" / "writings", max_chars=args.persona_budget)
+        if len(reader) == 0:
+            print(f"[chat] --persona 已开，但 data/writings/ 里没有可读的内容（0 段）")
+        else:
+            print(f"[chat] 读物已加载：{len(reader)} 段，每次按话题挑最相关的，"
+                  f"上限 {args.persona_budget} 字符")
+
     def reply(prompt: str) -> str:
-        text = f"问：{prompt}\n答：" if args.sft else prompt
+        ctx = ""
+        if reader is not None:
+            ctx = reader.relevant(prompt, k=2)
+            if ctx:
+                # 打印她读到了什么，方便确认读物真的进了视野
+                srcs = reader.explain(prompt, k=2)
+                print(f"  [读物] " + "、".join(f"{x['src']}({x['chars']}字)" for x in srcs))
+            else:
+                print(f"  [读物] 没有相关段落")
+        body = f"问：{prompt}\n答：" if args.sft else prompt
+        text = (ctx + "\n\n" + body) if ctx else body
         ids = tok.encode(text, add_bos=True)
         out = generate(model, ids, max_new_tokens=args.max_new,
                        temperature=args.temperature, top_k=args.top_k, top_p=args.top_p,
